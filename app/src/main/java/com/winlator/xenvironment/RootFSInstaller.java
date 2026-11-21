@@ -42,8 +42,13 @@ public abstract class RootFSInstaller {
         for (Container container : manager.getContainers()) {
             String rfsVersion = container.getExtra("rfsVersion");
             String wineVersion = container.getWineVersion();
-            if (!rfsVersion.isEmpty() && WineInfo.isMainWineVersion(wineVersion) && Short.parseShort(rfsVersion) <= UPDATE_WINEPREFIX_VERSION) {
-                container.putExtra("wineprefixNeedsUpdate", "t");
+            if (!rfsVersion.isEmpty() && WineInfo.isMainWineVersion(wineVersion)) {
+                try {
+                    if (Short.parseShort(rfsVersion) <= UPDATE_WINEPREFIX_VERSION) {
+                        container.putExtra("wineprefixNeedsUpdate", "t");
+                    }
+                }
+                catch (NumberFormatException ignored) {}
             }
 
             container.putExtra("rfsVersion", null);
@@ -68,7 +73,7 @@ public abstract class RootFSInstaller {
             boolean success = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, activity, FILENAME, rootDir, (file, size) -> {
                 if (size > 0) {
                     long totalSize = totalSizeRef.addAndGet(size);
-                    final int progress = (int)(((float)totalSize / contentLength) * 100);
+                    final int progress = contentLength > 0 ? Math.min(100, (int)(((double)totalSize / contentLength) * 100)) : 0;
                     activity.runOnUiThread(() -> dialog.setProgress(progress));
                 }
                 return file;
@@ -130,13 +135,25 @@ public abstract class RootFSInstaller {
 
             File containerPatternDir = new File(activity.getCacheDir(), "container_pattern");
             FileUtils.delete(containerPatternDir);
-            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, activity, "container_pattern.tzst", containerPatternDir);
+            boolean patternExtracted = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, activity, "container_pattern.tzst", containerPatternDir);
+            if (!patternExtracted) {
+                FileUtils.delete(containerPatternDir);
+                AppUtils.showToast(activity, R.string.unable_to_install_system_files);
+                preloaderDialog.closeOnUiThread();
+                return;
+            }
 
             File containerSystem32Dir = new File(containerPatternDir, ".wine/drive_c/windows/system32");
             File containerSysWoW64Dir = new File(containerPatternDir, ".wine/drive_c/windows/syswow64");
 
             dstFiles = containerSystem32Dir.listFiles();
             srcFiles = wineSystem32Dir.listFiles();
+            if (dstFiles == null || srcFiles == null) {
+                FileUtils.delete(containerPatternDir);
+                AppUtils.showToast(activity, R.string.unable_to_install_system_files);
+                preloaderDialog.closeOnUiThread();
+                return;
+            }
 
             ArrayList<String> system32Files = new ArrayList<>();
             ArrayList<String> syswow64Files = new ArrayList<>();
@@ -152,6 +169,12 @@ public abstract class RootFSInstaller {
 
             dstFiles = containerSysWoW64Dir.listFiles();
             srcFiles = wineSysWoW64Dir.listFiles();
+            if (dstFiles == null || srcFiles == null) {
+                FileUtils.delete(containerPatternDir);
+                AppUtils.showToast(activity, R.string.unable_to_install_system_files);
+                preloaderDialog.closeOnUiThread();
+                return;
+            }
 
             for (File dstFile : dstFiles) {
                 for (File srcFile : srcFiles) {
