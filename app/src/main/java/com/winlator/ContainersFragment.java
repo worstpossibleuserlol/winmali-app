@@ -106,8 +106,9 @@ public class ContainersFragment extends Fragment {
                 preloaderDialog.show(R.string.importing_container);
                 manager.importContainerAsync(uri, (container) -> {
                     preloaderDialog.close();
-                    if (container == null) {
-                        Toast.makeText(getContext(), R.string.container_import_failed, Toast.LENGTH_LONG).show();
+                    if (isAdded()) {
+                        Toast.makeText(getContext(), container == null ? R.string.container_import_failed :
+                            R.string.container_imported, Toast.LENGTH_LONG).show();
                     }
                     loadContainersList();
                 });

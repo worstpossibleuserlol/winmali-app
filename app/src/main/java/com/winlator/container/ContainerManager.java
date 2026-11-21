@@ -328,7 +328,9 @@ public class ContainerManager {
         if (directory == null || !directory.isDirectory()) return null;
         File config = new File(directory, ".container");
         File wine = new File(directory, ".wine");
-        if (config.isFile() && !FileUtils.isSymlink(config) && wine.isDirectory() && !FileUtils.isSymlink(wine)) return directory;
+        File windows = new File(wine, "drive_c/windows");
+        if (config.isFile() && !FileUtils.isSymlink(config) &&
+            wine.isDirectory() && !FileUtils.isSymlink(wine) && windows.isDirectory()) return directory;
         if (depth <= 0) return null;
         File[] children = directory.listFiles();
         if (children == null) return null;
