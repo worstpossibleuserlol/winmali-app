@@ -95,24 +95,6 @@ public class ContainersFragment extends Fragment {
             startActivityForResult(intent, REQUEST_IMPORT_CONTAINER);
             return true;
         }
-        if (menuItem.getItemId() == R.id.menu_item_import) {
-            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("*/*");
-            ((MainActivity)getActivity()).setOpenFileCallback((uri) -> {
-                preloaderDialog.show(R.string.importing_container);
-                manager.importContainerAsync(uri, (container) -> {
-                    preloaderDialog.close();
-                    if (isAdded()) {
-                        Toast.makeText(getContext(), container == null ? R.string.container_import_failed :
-                            R.string.container_imported, Toast.LENGTH_LONG).show();
-                    }
-                    loadContainersList();
-                });
-            });
-            startActivityForResult(intent, MainActivity.OPEN_FILE_REQUEST_CODE);
-            return true;
-        }
         else if (menuItem.getItemId() == R.id.menu_item_add) {
             if (!RootFS.find(getContext()).isValid()) return false;
             FragmentManager fragmentManager = getParentFragmentManager();
@@ -135,12 +117,10 @@ public class ContainersFragment extends Fragment {
             preloaderDialog.show(R.string.importing_container);
             manager.importContainerAsync(uri, (container) -> {
                 preloaderDialog.close();
-                if (container == null) {
-                    Toast.makeText(getContext(), R.string.container_import_failed, Toast.LENGTH_LONG).show();
-                }
-                else {
-                    Toast.makeText(getContext(), R.string.container_imported, Toast.LENGTH_SHORT).show();
-                    loadContainersList();
+                if (isAdded()) {
+                    Toast.makeText(getContext(), container == null ? R.string.container_import_failed :
+                        R.string.container_imported, Toast.LENGTH_LONG).show();
+                    if (container != null) loadContainersList();
                 }
             });
         }
