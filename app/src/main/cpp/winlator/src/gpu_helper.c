@@ -97,7 +97,7 @@ done:
 }
 
 JNIEXPORT jint JNICALL
-Java_com_winlator_core_GPUHelper_vkGetApiVersion(JNIEnv *env, jclass obj) {
+Java_com_winlator_core_GPUHelper_vkGetApiVersion(void) {
     int version = 0;
     char* content = fileGetContents(APP_CACHE_DIR "/.vk-api-version", NULL, NULL);
     if (content) {
@@ -110,7 +110,6 @@ Java_com_winlator_core_GPUHelper_vkGetApiVersion(JNIEnv *env, jclass obj) {
     PFN_vkDestroyInstance vkDestroyInstance = NULL;
     PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices = NULL;
     PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties = NULL;
-    PFN_vkGetPhysicalDeviceFeatures vkGetPhysicalDeviceFeatures = NULL;
     void* libvulkan = NULL;
     VkInstance instance = VK_NULL_HANDLE;
     VkPhysicalDevice* physicalDevices = NULL;
@@ -124,9 +123,8 @@ Java_com_winlator_core_GPUHelper_vkGetApiVersion(JNIEnv *env, jclass obj) {
     vkDestroyInstance = (PFN_vkDestroyInstance)dlsym(libvulkan, "vkDestroyInstance");
     vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)dlsym(libvulkan, "vkEnumeratePhysicalDevices");
     vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)dlsym(libvulkan, "vkGetPhysicalDeviceProperties");
-    vkGetPhysicalDeviceFeatures = (PFN_vkGetPhysicalDeviceFeatures)dlsym(libvulkan, "vkGetPhysicalDeviceFeatures");
     if (!vkCreateInstance || !vkDestroyInstance || !vkEnumeratePhysicalDevices ||
-        !vkGetPhysicalDeviceProperties || !vkGetPhysicalDeviceFeatures) goto done;
+        !vkGetPhysicalDeviceProperties) goto done;
 
     if (vkCreateInstance(&createInfo, NULL, &instance) != VK_SUCCESS || instance == VK_NULL_HANDLE) goto done;
 
@@ -144,20 +142,6 @@ Java_com_winlator_core_GPUHelper_vkGetApiVersion(JNIEnv *env, jclass obj) {
     vkGetPhysicalDeviceProperties(physicalDevices[0], &properties);
     version = (int)properties.apiVersion;
 
-    if (version >= VK_MAKE_VERSION(1, 3, 0)) {
-        VkPhysicalDeviceFeatures features = {0};
-        vkGetPhysicalDeviceFeatures(physicalDevices[0], &features);
-        VkPhysicalDeviceFeatures requiredFeatures = {VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_FALSE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_FALSE, VK_TRUE, VK_TRUE, VK_FALSE, VK_FALSE, VK_TRUE, VK_TRUE, VK_TRUE, VK_FALSE, VK_TRUE, VK_TRUE, VK_TRUE, VK_TRUE, VK_FALSE, VK_TRUE, VK_TRUE};
-
-        for (size_t offset = 0; offset < sizeof(VkPhysicalDeviceFeatures); offset += sizeof(VkBool32)) {
-            VkBool32 available = *(VkBool32*)(((char*)&features) + offset);
-            VkBool32 required = *(VkBool32*)(((char*)&requiredFeatures) + offset);
-            if (available != required) {
-                version = VK_MAKE_VERSION(1, 2, 0);
-                break;
-            }
-        }
-    }
 
     {
         char valueText[32] = {0};
