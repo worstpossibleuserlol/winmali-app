@@ -153,7 +153,7 @@ public abstract class TarCompressorUtils {
 
     private static boolean hasParentTraversal(String path) {
         if (path == null || path.isEmpty() || path.startsWith("/") || path.matches("^[A-Za-z]:.*")) return true;
-        String[] parts = path.replace('\\\\', '/').split("/");
+        String[] parts = path.replace((char)92, '/').split("/");
         for (String part : parts) {
             if ("..".equals(part)) return true;
         }
