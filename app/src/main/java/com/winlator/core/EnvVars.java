@@ -37,7 +37,7 @@ public class EnvVars implements Iterable<String> {
         StringBuilder token = new StringBuilder();
         for (int i = 0; i < values.length(); i++) {
             char current = values.charAt(i);
-            if (current == '\\\\' && i + 1 < values.length() &&
+            if (current == '\\' && i + 1 < values.length() &&
                 Character.isWhitespace(values.charAt(i + 1))) {
                 token.append(values.charAt(++i));
             }
@@ -86,7 +86,7 @@ public class EnvVars implements Iterable<String> {
         StringBuilder result = new StringBuilder();
         for (String key : data.keySet()) {
             if (result.length() > 0) result.append(' ');
-            result.append(key).append('=').append(data.get(key).replace(" ", "\\\\ "));
+            result.append(key).append('=').append(data.get(key).replace(" ", "\\ "));
         }
         return result.toString();
     }
