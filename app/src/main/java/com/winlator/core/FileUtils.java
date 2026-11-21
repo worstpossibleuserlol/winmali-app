@@ -60,14 +60,17 @@ public abstract class FileUtils {
     }
 
     public static String readString(Context context, Uri uri) {
+        if (context == null || uri == null) return null;
         StringBuilder sb = new StringBuilder();
-        try (InputStream inputStream = context.getContentResolver().openInputStream(uri);
-             BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
-            String line;
-            while ((line = reader.readLine()) != null) sb.append(line);
-            return sb.toString();
+        try (InputStream inputStream = context.getContentResolver().openInputStream(uri)) {
+            if (inputStream == null) return null;
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) sb.append(line);
+                return sb.toString();
+            }
         }
-        catch (IOException e) {
+        catch (IOException | SecurityException e) {
             return null;
         }
     }
@@ -290,19 +293,14 @@ public abstract class FileUtils {
         if (origin.isDirectory() && target.isDirectory()) {
             File[] originFiles = origin.listFiles();
             File[] targetFiles = target.listFiles();
+            if (originFiles == null || targetFiles == null || originFiles.length != targetFiles.length) return false;
 
-            if (originFiles != null && targetFiles != null) {
-                if (originFiles.length != targetFiles.length) return false;
-
-                for (File originChild : originFiles) {
-                    File targetChild = new File(target, originChild.getName());
-                    if (!targetChild.exists() && !isSymlink(targetChild)) return false;
-                    if (!contentEquals(originChild, targetChild)) return false;
-                }
-
-                return true;
+            for (File originChild : originFiles) {
+                File targetChild = new File(target, originChild.getName());
+                if (!targetChild.exists() && !isSymlink(targetChild)) return false;
+                if (!contentEquals(originChild, targetChild)) return false;
             }
-            else return originFiles == null && targetFiles == null;
+            return true;
         }
         else if (origin.isFile() && target.isFile()) {
             if (origin.length() != target.length()) return false;
@@ -323,17 +321,19 @@ public abstract class FileUtils {
     }
 
     public static void getSizeAsync(File file, Callback<Long> callback) {
+        if (file == null || callback == null) return;
         Thread worker = new Thread(() -> getSize(file, callback), "WinMali-file-size");
         worker.setDaemon(true);
         worker.start();
     }
 
     private static void getSize(File file, Callback<Long> callback) {
-        if (file == null) return;
+        if (file == null || callback == null || isSymlink(file)) return;
         if (file.isFile()) {
             callback.call(file.length());
             return;
         }
+        if (!file.isDirectory()) return;
 
         Stack<File> stack = new Stack<>();
         stack.push(file);
@@ -342,12 +342,15 @@ public abstract class FileUtils {
             File current = stack.pop();
             File[] files = current.listFiles();
             if (files == null) continue;
-            for (File f : files) {
-                if (f.isDirectory()) {
-                    stack.push(f);
+            for (File child : files) {
+                // Do not follow symlinked directories: they can point to an ancestor
+                // and make the scan loop forever or count files outside this tree.
+                if (isSymlink(child)) continue;
+                if (child.isDirectory()) {
+                    stack.push(child);
                 }
-                else {
-                    long length = f.length();
+                else if (child.isFile()) {
+                    long length = child.length();
                     if (length > 0) callback.call(length);
                 }
             }
