@@ -146,6 +146,56 @@ public class TarCompressorUtilsTest {
     }
 
     @Test
+    public void rejectsEmptyArchive() throws IOException {
+        File archive = createArchive();
+        File destination = new File(temporaryFolder.getRoot(), "empty-extract");
+
+        assertFalse(TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, archive, destination));
+    }
+
+    @Test
+    public void listenerCanSkipEntriesWithoutWritingThem() throws IOException {
+        File archive = createArchive(EntrySpec.file("skip-me.txt", "payload"));
+        File destination = new File(temporaryFolder.getRoot(), "skip-extract");
+
+        assertTrue(TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, archive, destination,
+            (file, size) -> null));
+        assertFalse(new File(destination, "skip-me.txt").exists());
+    }
+
+    @Test
+    public void extractionTruncatesAnExistingLongerFile() throws IOException {
+        File archive = createArchive(EntrySpec.file("replace.txt", "new"));
+        File destination = new File(temporaryFolder.getRoot(), "replace-extract");
+        assertTrue(destination.mkdirs());
+        Files.write(new File(destination, "replace.txt").toPath(), "old-content-that-is-longer".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        assertTrue(TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, archive, destination));
+        assertEquals("new", FileUtils.readString(new File(destination, "replace.txt")));
+    }
+
+    @Test
+    public void rejectsSymlinkThatEscapesExtractionRoot() throws IOException {
+        File archive = createArchive(
+            EntrySpec.symlink("escape", "../outside"),
+            EntrySpec.file("escape/payload.txt", "outside"));
+        File destination = new File(temporaryFolder.getRoot(), "symlink-escape");
+
+        assertFalse(TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, archive, destination));
+        assertFalse(new File(temporaryFolder.getRoot(), "outside/payload.txt").exists());
+    }
+
+    @Test
+    public void rejectsHardLinkEntries() throws IOException {
+        File archive = createArchive(new EntrySpec("hard-link", TarArchiveEntry.LF_LINK,
+            "target", new byte[0], false));
+        File destination = new File(temporaryFolder.getRoot(), "hard-link-extract");
+
+        assertFalse(TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, archive, destination));
+    }
+
+
+    @Test
     public void rejectsSymlinkTargetOutsideDestination() throws IOException {
         File destination = new File(temporaryFolder.getRoot(), "rootfs");
         File archive = createArchive(EntrySpec.symlink("escape", "../../outside.txt"));
