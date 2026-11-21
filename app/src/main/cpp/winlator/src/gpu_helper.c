@@ -14,6 +14,7 @@
 #include "file_utils.h"
 
 EGLContext globalEGLContext = EGL_NO_CONTEXT;
+static int cachedVkApiVersion = 0;
 
 JNIEXPORT jobjectArray JNICALL
 Java_com_winlator_core_GPUHelper_vkGetDeviceExtensions(JNIEnv *env, jclass obj) {
@@ -98,13 +99,10 @@ done:
 
 JNIEXPORT jint JNICALL
 Java_com_winlator_core_GPUHelper_vkGetApiVersion(void) {
+    int cachedVersion = __atomic_load_n(&cachedVkApiVersion, __ATOMIC_ACQUIRE);
+    if (cachedVersion > 0) return cachedVersion;
+
     int version = 0;
-    char* content = fileGetContents(APP_CACHE_DIR "/.vk-api-version", NULL, NULL);
-    if (content) {
-        version = strtol(content, NULL, 10);
-        MEMFREE(content);
-        if (version > 0) return version;
-    }
 
     PFN_vkCreateInstance vkCreateInstance = NULL;
     PFN_vkDestroyInstance vkDestroyInstance = NULL;
@@ -143,13 +141,8 @@ Java_com_winlator_core_GPUHelper_vkGetApiVersion(void) {
     version = (int)properties.apiVersion;
 
 
-    {
-        char valueText[32] = {0};
-        snprintf(valueText, sizeof(valueText), "%d", version);
-        filePutContents(APP_CACHE_DIR "/.vk-api-version", valueText, strlen(valueText));
-    }
-
 done:
+    if (version > 0) __atomic_store_n(&cachedVkApiVersion, version, __ATOMIC_RELEASE);
     if (instance != VK_NULL_HANDLE && vkDestroyInstance) vkDestroyInstance(instance, NULL);
     free(physicalDevices);
     if (libvulkan) dlclose(libvulkan);
