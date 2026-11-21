@@ -109,6 +109,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     private XEnvironment environment;
     private DrawerLayout drawerLayout;
     private Container container;
+    private ContainerManager containerManager;
     private XServer xServer;
     private InputControlsManager inputControlsManager;
     private RootFS rootFS;
@@ -166,9 +167,12 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         rootFS = RootFS.find(this);
 
         if (!isGenerateWineprefix()) {
-            ContainerManager containerManager = new ContainerManager(this);
+            containerManager = new ContainerManager(this);
             container = containerManager.getContainerById(getIntent().getIntExtra("container_id", 0));
-            containerManager.activateContainer(container);
+            if (container == null || !containerManager.activateContainer(container)) {
+                finish();
+                return;
+            }
 
             boolean wineprefixNeedsUpdate = container.getExtra("wineprefixNeedsUpdate").equals("t");
             if (wineprefixNeedsUpdate) {
@@ -343,6 +347,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     protected void onDestroy() {
         winHandler.stop();
         if (environment != null) environment.stopEnvironmentComponents();
+        if (containerManager != null && container != null) containerManager.deactivateContainer(container);
         ForegroundService.stopSession(this);
         super.onDestroy();
     }
