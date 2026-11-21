@@ -26,7 +26,14 @@ public class RootFS {
     public static RootFS find(Context context) {
         File legacyDir = new File(context.getFilesDir(), "imagefs");
         File rootDir = new File(context.getFilesDir(), "rootfs");
-        if (legacyDir.isDirectory()) legacyDir.renameTo(rootDir);
+
+        // Prefer the current location, but never lose access to a legacy rootfs
+        // when migration cannot rename it (for example, filesystem or storage errors).
+        if (!rootDir.exists() && legacyDir.isDirectory() && !legacyDir.renameTo(rootDir)) {
+            return new RootFS(legacyDir);
+        }
+        if (rootDir.isDirectory()) return new RootFS(rootDir);
+        if (legacyDir.isDirectory()) return new RootFS(legacyDir);
         return new RootFS(rootDir);
     }
 
