@@ -24,6 +24,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.concurrent.atomic.AtomicLong;
 
 public abstract class TarCompressorUtils {
@@ -33,25 +36,23 @@ public abstract class TarCompressorUtils {
         File onExtractFile(File destination, long size);
     }
 
-    private static void addFile(ArchiveOutputStream tar, File file, String entryName) {
-        try {
-            tar.putArchiveEntry(tar.createArchiveEntry(file, entryName));
-            try (BufferedInputStream inStream = new BufferedInputStream(new FileInputStream(file), StreamUtils.BUFFER_SIZE)) {
-                StreamUtils.copy(inStream, tar);
-            }
+    private static void addFile(ArchiveOutputStream tar, File file, String entryName) throws IOException {
+        tar.putArchiveEntry(tar.createArchiveEntry(file, entryName));
+        try (BufferedInputStream inStream = new BufferedInputStream(new FileInputStream(file), StreamUtils.BUFFER_SIZE)) {
+            if (!StreamUtils.copy(inStream, tar)) throw new IOException("Unable to read archive source: "+file);
+        }
+        finally {
             tar.closeArchiveEntry();
         }
-        catch (Exception e) {}
     }
 
-    private static void addLinkFile(ArchiveOutputStream tar, File file, String entryName) {
-        try {
-            TarArchiveEntry entry = new TarArchiveEntry(entryName, TarConstants.LF_SYMLINK);
-            entry.setLinkName(FileUtils.readSymlink(file));
-            tar.putArchiveEntry(entry);
-            tar.closeArchiveEntry();
-        }
-        catch (Exception e) {}
+    private static void addLinkFile(ArchiveOutputStream tar, File file, String entryName) throws IOException {
+        String linkTarget = FileUtils.readSymlink(file);
+        if (linkTarget == null || linkTarget.isEmpty()) throw new IOException("Unable to read symbolic link: "+file);
+        TarArchiveEntry entry = new TarArchiveEntry(entryName, TarConstants.LF_SYMLINK);
+        entry.setLinkName(linkTarget);
+        tar.putArchiveEntry(entry);
+        tar.closeArchiveEntry();
     }
 
     private static void addDirectory(ArchiveOutputStream tar, File folder, String basePath) throws IOException {
@@ -71,37 +72,73 @@ public abstract class TarCompressorUtils {
         }
     }
 
-    public static void compress(Type type, File file, File destination) {
-        compress(type, file, destination, 3);
+    public static boolean compress(Type type, File file, File destination) {
+        return compress(type, file, destination, 3);
     }
 
-    public static void compress(Type type, File file, File destination, int level) {
-        compress(type, new File[]{file}, destination, level);
+    public static boolean compress(Type type, File file, File destination, int level) {
+        return compress(type, new File[]{file}, destination, level);
     }
 
-    public static void compress(Type type, File[] files, File destination, int level) {
-        try (OutputStream outStream = getCompressorOutputStream(type, destination, level);
-             TarArchiveOutputStream tar = new TarArchiveOutputStream(outStream)) {
-            tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_GNU);
-            boolean skipFirstEntry = files.length == 1 && files[0].getName().equals(".");
-            for (File file : files) {
-                if (FileUtils.isSymlink(file)) {
-                    addLinkFile(tar, file, file.getName());
-                }
-                else if (file.isDirectory()) {
-                    String basePath = "";
-                    if (!skipFirstEntry) {
-                        basePath = file.getName() + "/";
-                        tar.putArchiveEntry(tar.createArchiveEntry(file, basePath));
-                        tar.closeArchiveEntry();
-                    }
-                    addDirectory(tar, file, basePath);
-                }
-                else addFile(tar, file, file.getName());
-            }
-            tar.finish();
+    public static boolean compress(Type type, File[] files, File destination, int level) {
+        if (files == null || files.length == 0 || destination == null) return false;
+        File parent = destination.getAbsoluteFile().getParentFile();
+        if (parent == null || (!parent.isDirectory() && !parent.mkdirs())) return false;
+
+        File temporaryFile;
+        try {
+            temporaryFile = File.createTempFile(destination.getName()+".", ".partial", parent);
         }
-        catch (IOException e) {}
+        catch (IOException e) {
+            return false;
+        }
+
+        boolean completed = false;
+        try {
+            try (OutputStream outStream = getCompressorOutputStream(type, temporaryFile, level);
+                 TarArchiveOutputStream tar = new TarArchiveOutputStream(outStream)) {
+                tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_GNU);
+                boolean skipFirstEntry = files.length == 1 && files[0] != null && files[0].getName().equals(".");
+                for (File file : files) {
+                    if (file == null || (!file.exists() && !FileUtils.isSymlink(file))) {
+                        throw new IOException("Archive source does not exist: "+file);
+                    }
+                    if (FileUtils.isSymlink(file)) {
+                        addLinkFile(tar, file, file.getName());
+                    }
+                    else if (file.isDirectory()) {
+                        String basePath = "";
+                        if (!skipFirstEntry) {
+                            basePath = file.getName() + "/";
+                            tar.putArchiveEntry(tar.createArchiveEntry(file, basePath));
+                            tar.closeArchiveEntry();
+                        }
+                        addDirectory(tar, file, basePath);
+                    }
+                    else if (file.isFile()) addFile(tar, file, file.getName());
+                    else throw new IOException("Unsupported archive source: "+file);
+                }
+                tar.finish();
+            }
+
+            if (!temporaryFile.isFile() || temporaryFile.length() == 0) throw new IOException("Archive output is empty");
+            try {
+                Files.move(temporaryFile.toPath(), destination.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            }
+            catch (AtomicMoveNotSupportedException e) {
+                Files.move(temporaryFile.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
+            completed = destination.isFile() && destination.length() > 0;
+        }
+        catch (IOException | RuntimeException e) {
+            completed = false;
+        }
+        finally {
+            if (temporaryFile.exists()) temporaryFile.delete();
+            if (!completed && destination.exists() && destination.length() == 0) destination.delete();
+        }
+        return completed;
     }
 
     public static boolean extract(Type type, Context context, String assetFile, File destination) {
