@@ -128,11 +128,18 @@ public abstract class WineInstaller {
         return null;
     }
 
-    private static boolean hasWineRuntimeBinaries(File root) {
+    static File findWineExecutable(File root) {
+        if (root == null) return null;
         File bin = new File(root, "bin");
-        File wine = new File(bin, "wine");
         File wine64 = new File(bin, "wine64");
-        return wine.isFile() && ((wine64.isFile() && ElfHelper.is64Bit(wine64)) || ElfHelper.is64Bit(wine));
+        if (wine64.isFile() && ElfHelper.is64Bit(wine64)) return wine64;
+
+        File wine = new File(bin, "wine");
+        return wine.isFile() && ElfHelper.is64Bit(wine) ? wine : null;
+    }
+
+    private static boolean hasWineRuntimeBinaries(File root) {
+        return findWineExecutable(root) != null;
     }
 
     public static void findWineVersionAsync(Context context, File wineDir, Callback<WineInfo> callback) {
@@ -146,24 +153,15 @@ public abstract class WineInstaller {
             return;
         }
 
-        File binDir = new File(wineDir, "bin");
-        File wineBin = new File(binDir, "wine");
-        File wineBin64 = new File(binDir, "wine64");
-
-        if (!wineBin.isFile()) {
-            callback.call(null);
-            return;
-        }
-
-        final boolean is64Bit = (wineBin64.isFile() && ElfHelper.is64Bit(wineBin64)) || ElfHelper.is64Bit(wineBin);
-        if (!is64Bit) {
+        File wineExecutable = findWineExecutable(wineDir);
+        if (wineExecutable == null) {
             callback.call(null);
             return;
         }
 
         RootFS rootFS = RootFS.find(context);
         File rootDir = rootFS.getRootDir();
-        String wineBinPath = wineBin64.isFile() ? wineBin64.getPath() : wineBin.getPath();
+        String wineBinPath = wineExecutable.getPath();
         final String winePath = wineDir.getPath();
 
         final AtomicReference<WineInfo> wineInfoRef = new AtomicReference<>();
