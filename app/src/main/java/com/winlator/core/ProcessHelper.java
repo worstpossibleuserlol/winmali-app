@@ -16,9 +16,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.lang.reflect.Field;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.List;
@@ -367,22 +369,28 @@ public abstract class ProcessHelper {
     static List<PStat> collectDescendants(List<PStat> processes, int rootPID) {
         if (processes == null || processes.isEmpty()) return Collections.emptyList();
 
-        Set<Integer> descendantPids = new HashSet<>();
-        descendantPids.add(rootPID);
+        Map<Integer, ArrayList<PStat>> childrenByParent = new HashMap<>();
+        for (PStat process : processes) {
+            if (process == null || process.pid <= 0 || process.pid == rootPID) continue;
+            childrenByParent.computeIfAbsent(process.parentPID, key -> new ArrayList<>()).add(process);
+        }
+
+        Set<Integer> visited = new HashSet<>();
+        ArrayDeque<Integer> pending = new ArrayDeque<>();
         ArrayList<PStat> descendants = new ArrayList<>();
-        boolean changed;
-        do {
-            changed = false;
-            for (PStat process : processes) {
-                if (process == null || process.pid <= 0 || process.pid == rootPID ||
-                    descendantPids.contains(process.pid)) continue;
-                if (descendantPids.contains(process.parentPID)) {
-                    descendantPids.add(process.pid);
-                    descendants.add(process);
-                    changed = true;
+        visited.add(rootPID);
+        pending.add(rootPID);
+
+        while (!pending.isEmpty()) {
+            ArrayList<PStat> children = childrenByParent.get(pending.removeFirst());
+            if (children == null) continue;
+            for (PStat child : children) {
+                if (visited.add(child.pid)) {
+                    descendants.add(child);
+                    pending.addLast(child.pid);
                 }
             }
-        } while (changed);
+        }
 
         descendants.sort(Comparator.comparingInt(process -> process.pid));
         return descendants;
@@ -397,17 +405,19 @@ public abstract class ProcessHelper {
         for (String pid : pids) {
             try {
                 PStat pstat = parseProcessStat(FileUtils.readString(new File("/proc/" + pid + "/stat")));
-                if (pstat == null) continue;
-                pstat.name = getProcessName(pstat.pid);
-                if (pstat.name.isEmpty()) pstat.name = pstat.shortName;
-                pstat.guestProcess = pstat.name.contains("wine") || pstat.name.contains(".exe");
-                processes.add(pstat);
+                if (pstat != null) processes.add(pstat);
             }
             catch (RuntimeException ignored) {
                 // A process may exit after /proc was enumerated. Keep the other results.
             }
         }
 
-        return collectDescendants(processes, Os.getpid());
+        List<PStat> descendants = collectDescendants(processes, Os.getpid());
+        for (PStat process : descendants) {
+            process.name = getProcessName(process.pid);
+            if (process.name.isEmpty()) process.name = process.shortName;
+            process.guestProcess = process.name.contains("wine") || process.name.contains(".exe");
+        }
+        return descendants;
     }
 }
