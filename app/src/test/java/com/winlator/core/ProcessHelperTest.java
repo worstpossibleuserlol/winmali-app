@@ -52,6 +52,35 @@ public class ProcessHelperTest {
     }
 
     @Test
+    public void buildsCpuAffinityMaskWithoutByteOverflow() {
+        assertEquals(0x80000001, ProcessHelper.getAffinityMask("0,31"));
+        assertEquals("80000001", ProcessHelper.getAffinityMaskAsHexString("0,31"));
+        assertEquals(0, ProcessHelper.getAffinityMask("bad,-1,32"));
+    }
+
+    @Test
+    public void collectsOnlyActualDescendantsNotUnrelatedHigherPids() {
+        ProcessHelper.PStat unrelated = process(900, 1);
+        ProcessHelper.PStat child = process(120, 100);
+        ProcessHelper.PStat grandchild = process(121, 120);
+        ProcessHelper.PStat otherBranch = process(122, 999);
+
+        java.util.List<ProcessHelper.PStat> result = ProcessHelper.collectDescendants(
+            java.util.Arrays.asList(unrelated, child, grandchild, otherBranch), 100);
+
+        assertEquals(2, result.size());
+        assertEquals(120, result.get(0).pid);
+        assertEquals(121, result.get(1).pid);
+    }
+
+    private static ProcessHelper.PStat process(int pid, int parentPid) {
+        ProcessHelper.PStat process = new ProcessHelper.PStat();
+        process.pid = pid;
+        process.parentPID = parentPid;
+        return process;
+    }
+
+    @Test
     public void rejectsUnterminatedQuotes() {
         assertThrows(IllegalArgumentException.class, () -> ProcessHelper.splitCommand("program \"unfinished"));
     }
