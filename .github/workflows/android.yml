@@ -74,7 +74,7 @@ jobs:
       - name: Upload WinMali 1.0.0 APK
         uses: actions/upload-artifact@v4
         with:
-          name: WinMali_1.0.0_Alpha
-          path: app/build/outputs/apk/debug/WinMali_1.0.0_Alpha.apk
+          name: WinMali_1.0.0
+          path: app/build/outputs/apk/debug/WinMali_1.0.0.apk
           if-no-files-found: error
           retention-days: 30
