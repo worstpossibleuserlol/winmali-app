@@ -176,7 +176,11 @@ public abstract class RootFSInstaller {
 
                 File outputFile = new File(activity.getCacheDir(), "container_pattern.tzst");
                 FileUtils.delete(outputFile);
-                TarCompressorUtils.compress(TarCompressorUtils.Type.ZSTD, new File(containerPatternDir, ".wine"), outputFile, 22);
+                boolean archiveCreated = TarCompressorUtils.compress(TarCompressorUtils.Type.ZSTD,
+                    new File(containerPatternDir, ".wine"), outputFile, 22);
+                if (!archiveCreated) {
+                    AppUtils.showToast(activity, R.string.unable_to_install_system_files);
+                }
 
                 FileUtils.delete(containerPatternDir);
                 preloaderDialog.closeOnUiThread();
