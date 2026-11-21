@@ -13,6 +13,7 @@ import android.widget.TextView;
 import com.winlator.R;
 import com.winlator.box64.Box64Utils;
 import com.winlator.core.CPUStatus;
+import com.winlator.core.GPUStatus;
 import com.winlator.core.StringUtils;
 
 import java.util.Locale;
@@ -30,6 +31,7 @@ public class FrameRating extends FrameLayout implements Runnable {
     private ActivityManager activityManager;
     private ActivityManager.MemoryInfo memoryInfo;
     private String cpuInfo = null;
+    private String gpuInfo = "N/A";
     private byte tick = 0;
 
     public FrameRating(Context context) {
@@ -95,7 +97,14 @@ public class FrameRating extends FrameLayout implements Runnable {
     }
 
     public void setGPUInfo(String gpuInfo) {
-        post(() -> ((TextView)gpuPanel.getChildAt(1)).setText(gpuInfo));
+        this.gpuInfo = gpuInfo == null || gpuInfo.trim().isEmpty() ? "N/A" : gpuInfo.trim();
+        post(() -> ((TextView)gpuPanel.getChildAt(1)).setText(formatGPUInfo()));
+    }
+
+    private String formatGPUInfo() {
+        int usage = GPUStatus.getUsagePercent();
+        String usageText = usage >= 0 ? usage+"%" : "Unavailable";
+        return usageText+" | "+gpuInfo;
     }
 
     public void reset() {
@@ -132,6 +141,8 @@ public class FrameRating extends FrameLayout implements Runnable {
             if (cpuInfo == null) {
                 cpuInfo = "Box64 v"+ Box64Utils.extractBinVersion(cpuPanel.getContext());
             }
+
+            ((TextView)gpuPanel.getChildAt(1)).setText(formatGPUInfo());
 
             int cpuUsage = CPUStatus.getUsagePercent();
             short[] clockSpeeds = CPUStatus.getCurrentClockSpeeds();
