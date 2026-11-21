@@ -25,8 +25,14 @@ public class GraphicsDriverPicker {
         for (int i = 0; i < apiNames.length; i++) {
             final TaggedSelectionBox taggedSelectionBox = new TaggedSelectionBox(context);
             taggedSelectionBox.setLabel(apiNames[i]);
-            taggedSelectionBox.setItems(GraphicsDrivers.getItems(apiNames[i]));
-            taggedSelectionBox.setSelectedItem(GraphicsDrivers.getName(identifiers[i]));
+            taggedSelectionBox.setItems(GraphicsDrivers.getItems(apiNames[i], context));
+            String selectedDriver = identifiers[i];
+            if (i == 0 && GraphicsDrivers.isMaliGPU(context) && GraphicsDrivers.TURNIP.equals(selectedDriver)) {
+                // If a container was previously configured with Turnip, present a supported
+                // Vulkan choice rather than implying that Turnip works on Mali hardware.
+                selectedDriver = GraphicsDrivers.VORTEK;
+            }
+            taggedSelectionBox.setSelectedItem(GraphicsDrivers.getName(selectedDriver));
             taggedSelectionBox.setTag(configs[i].toString());
             taggedSelectionBox.setOnButtonClickListener(() -> {
                 final String graphicsDriver = StringUtils.parseIdentifier(taggedSelectionBox.getSelectedItem());

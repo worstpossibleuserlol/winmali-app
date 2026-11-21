@@ -33,6 +33,12 @@ public abstract class GraphicsDrivers {
         return identifier != null && (identifier.equals(ZINK) || identifier.equals(VIRGL) || identifier.equals(GLADIO));
     }
 
+    public static boolean isMaliGPU(Context context) {
+        String renderer = GPUHelper.glGetRenderer(context).toLowerCase(java.util.Locale.ENGLISH);
+        String vendor = GPUHelper.glGetVendor(context).toLowerCase(java.util.Locale.ENGLISH);
+        return renderer.contains("mali") || vendor.contains("arm");
+    }
+
     public static String[] getItems(String apiName) {
         if (apiName.equalsIgnoreCase("VULKAN")) {
             return new String[]{getName(TURNIP), getName(VORTEK)};
@@ -41,6 +47,14 @@ public abstract class GraphicsDrivers {
             return new String[]{getName(ZINK), getName(VIRGL), getName(GLADIO)};
         }
         else return new String[0];
+    }
+
+    public static String[] getItems(String apiName, Context context) {
+        if (apiName.equalsIgnoreCase("VULKAN") && isMaliGPU(context)) {
+            // Turnip is a Mesa Vulkan driver for Qualcomm Adreno GPUs, not Mali GPUs.
+            return new String[]{getName(VORTEK)};
+        }
+        return getItems(apiName);
     }
 
     public static String[] parseIdentifiers(String graphicsDriver) {
