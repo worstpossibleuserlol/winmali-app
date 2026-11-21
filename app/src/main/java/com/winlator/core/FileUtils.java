@@ -24,13 +24,11 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
-import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Stack;
 import java.util.UUID;
-import java.util.concurrent.Executors;
 
 public abstract class FileUtils {
     public static byte[] read(Context context, String assetFile) {
@@ -52,11 +50,13 @@ public abstract class FileUtils {
     }
 
     public static String readString(Context context, String assetFile) {
-        return new String(read(context, assetFile), StandardCharsets.UTF_8);
+        byte[] data = read(context, assetFile);
+        return data != null ? new String(data, StandardCharsets.UTF_8) : "";
     }
 
     public static String readString(File file) {
-        return new String(read(file), StandardCharsets.UTF_8);
+        byte[] data = read(file);
+        return data != null ? new String(data, StandardCharsets.UTF_8) : "";
     }
 
     public static String readString(Context context, Uri uri) {
@@ -95,16 +95,20 @@ public abstract class FileUtils {
         return false;
     }
 
-    public static void symlink(File linkTarget, File linkFile) {
-        symlink(linkTarget.getAbsolutePath(), linkFile.getAbsolutePath());
+    public static boolean symlink(File linkTarget, File linkFile) {
+        return symlink(linkTarget.getAbsolutePath(), linkFile.getAbsolutePath());
     }
 
-    public static void symlink(String linkTarget, String linkFile) {
+    public static boolean symlink(String linkTarget, String linkFile) {
+        File destination = new File(linkFile);
         try {
-            (new File(linkFile)).delete();
+            if ((destination.exists() || isSymlink(destination)) && !destination.delete()) return false;
             Os.symlink(linkTarget, linkFile);
+            return isSymlink(destination);
         }
-        catch (ErrnoException e) {}
+        catch (ErrnoException | SecurityException e) {
+            return false;
+        }
     }
 
     public static boolean isSymlink(File file) {
@@ -173,15 +177,13 @@ public abstract class FileUtils {
             File parent = dstFile.getParentFile();
             if (!srcFile.exists() || (parent != null && !parent.exists() && !parent.mkdirs())) return false;
 
-            try {
-                FileChannel inChannel = (new FileInputStream(srcFile)).getChannel();
-                FileChannel outChannel = (new FileOutputStream(dstFile)).getChannel();
-                inChannel.transferTo(0, inChannel.size(), outChannel);
-                inChannel.close();
-                outChannel.close();
+            try (InputStream inStream = new BufferedInputStream(new FileInputStream(srcFile), StreamUtils.BUFFER_SIZE);
+                 OutputStream outStream = new BufferedOutputStream(new FileOutputStream(dstFile), StreamUtils.BUFFER_SIZE)) {
+                if (!StreamUtils.copy(inStream, outStream)) return false;
+                if (dstFile.length() != srcFile.length()) return false;
 
                 if (callback != null) callback.call(dstFile);
-                return dstFile.exists();
+                return true;
             }
             catch (IOException e) {
                 return false;
@@ -287,13 +289,15 @@ public abstract class FileUtils {
     public static boolean contentEquals(File origin, File target) {
         if (origin.isDirectory() && target.isDirectory()) {
             File[] originFiles = origin.listFiles();
-            File[] targetFiles = origin.listFiles();
+            File[] targetFiles = target.listFiles();
 
             if (originFiles != null && targetFiles != null) {
                 if (originFiles.length != targetFiles.length) return false;
 
-                for (int i = 0; i < originFiles.length; i++) {
-                    if (!contentEquals(originFiles[i], targetFiles[i])) return false;
+                for (File originChild : originFiles) {
+                    File targetChild = new File(target, originChild.getName());
+                    if (!targetChild.exists() && !isSymlink(targetChild)) return false;
+                    if (!contentEquals(originChild, targetChild)) return false;
                 }
 
                 return true;
@@ -319,7 +323,9 @@ public abstract class FileUtils {
     }
 
     public static void getSizeAsync(File file, Callback<Long> callback) {
-        Executors.newSingleThreadExecutor().execute(() -> getSize(file, callback));
+        Thread worker = new Thread(() -> getSize(file, callback), "WinMali-file-size");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     private static void getSize(File file, Callback<Long> callback) {
