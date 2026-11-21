@@ -21,6 +21,7 @@ import javax.microedition.khronos.egl.EGL10;
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.egl.EGLContext;
 import javax.microedition.khronos.egl.EGLDisplay;
+import javax.microedition.khronos.egl.EGLSurface;
 import javax.microedition.khronos.opengles.GL10;
 
 import dalvik.annotation.optimization.CriticalNative;
@@ -90,6 +91,7 @@ public abstract class GPUHelper {
         EGL10 egl = null;
         EGLDisplay display = EGL10.EGL_NO_DISPLAY;
         EGLContext eglContext = EGL10.EGL_NO_CONTEXT;
+        EGLSurface surface = EGL10.EGL_NO_SURFACE;
         boolean initialized = false;
         try {
             egl = (EGL10)EGLContext.getEGL();
@@ -114,10 +116,14 @@ public abstract class GPUHelper {
             if (!egl.eglChooseConfig(display, attrs, configs, 1, configCount) ||
                 configCount[0] < 1 || configs[0] == null) return info;
 
+            int[] surfaceAttrs = {EGL10.EGL_WIDTH, 1, EGL10.EGL_HEIGHT, 1, EGL10.EGL_NONE};
+            surface = egl.eglCreatePbufferSurface(display, configs[0], surfaceAttrs);
+            if (surface == EGL10.EGL_NO_SURFACE) return info;
+
             attrs = new int[]{EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL10.EGL_NONE};
             eglContext = egl.eglCreateContext(display, configs[0], EGL10.EGL_NO_CONTEXT, attrs);
             if (eglContext == EGL10.EGL_NO_CONTEXT) return info;
-            if (!egl.eglMakeCurrent(display, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE, eglContext)) return info;
+            if (!egl.eglMakeCurrent(display, surface, surface, eglContext)) return info;
 
             GL10 gl = (GL10)eglContext.getGL();
             String renderer = Objects.toString(gl.glGetString(GL10.GL_RENDERER), "");
@@ -139,6 +145,7 @@ public abstract class GPUHelper {
         finally {
             if (egl != null && display != EGL10.EGL_NO_DISPLAY) {
                 egl.eglMakeCurrent(display, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_CONTEXT);
+                if (surface != EGL10.EGL_NO_SURFACE) egl.eglDestroySurface(display, surface);
                 if (eglContext != EGL10.EGL_NO_CONTEXT) egl.eglDestroyContext(display, eglContext);
                 if (initialized) egl.eglTerminate(display);
             }
