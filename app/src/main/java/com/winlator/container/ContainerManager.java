@@ -226,7 +226,11 @@ public class ContainerManager {
             }
         }
         else {
-            for (Container container : containers) {
+            ArrayList<Container> containerSnapshot;
+            synchronized (this) {
+                containerSnapshot = new ArrayList<>(containers);
+            }
+            for (Container container : containerSnapshot) {
                 File desktopDir = new File(container.getUserDir(), "Desktop");
                 File[] files = desktopDir.listFiles();
                 if (files != null) {
