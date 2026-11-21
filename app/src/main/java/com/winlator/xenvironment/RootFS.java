@@ -52,7 +52,10 @@ public class RootFS {
         if (root == null || !root.isDirectory()) return false;
         File wine = new File(root, "opt/wine");
         File bin = new File(wine, "bin");
-        boolean hasWine = new File(bin, "wine").isFile() || new File(bin, "wine64").isFile();
+        File wineBinary = new File(bin, "wine");
+        File wine64Binary = new File(bin, "wine64");
+        boolean hasWine = (wineBinary.isFile() && wineBinary.length() > 0) ||
+            (wine64Binary.isFile() && wine64Binary.length() > 0);
         return hasWine &&
             new File(wine, "lib/wine/x86_64-windows").isDirectory() &&
             new File(wine, "lib/wine/i386-windows").isDirectory();
