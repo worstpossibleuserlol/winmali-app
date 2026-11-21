@@ -110,19 +110,20 @@ public abstract class WineInstaller {
     }
 
     private static File resolveWineRuntimeRoot(File extractedDir) {
-        if (extractedDir == null || !extractedDir.isDirectory()) return null;
-        if (hasWineRuntimeBinaries(extractedDir)) return extractedDir;
+        return findWineRuntimeRoot(extractedDir, 3);
+    }
 
-        File[] children = extractedDir.listFiles();
+    private static File findWineRuntimeRoot(File directory, int remainingDepth) {
+        if (directory == null || !directory.isDirectory()) return null;
+        if (hasWineRuntimeBinaries(directory)) return directory;
+        if (remainingDepth <= 0) return null;
+
+        File[] children = directory.listFiles();
         if (children == null) return null;
         for (File child : children) {
-            if (child.isDirectory() && hasWineRuntimeBinaries(child)) return child;
-        }
-
-        String[] knownRoots = {"files", "dist", "wine", "usr"};
-        for (String name : knownRoots) {
-            File candidate = new File(extractedDir, name);
-            if (hasWineRuntimeBinaries(candidate)) return candidate;
+            if (!child.isDirectory() || FileUtils.isSymlink(child)) continue;
+            File result = findWineRuntimeRoot(child, remainingDepth - 1);
+            if (result != null) return result;
         }
         return null;
     }
