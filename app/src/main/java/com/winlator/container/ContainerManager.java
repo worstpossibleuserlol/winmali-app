@@ -59,7 +59,7 @@ public class ContainerManager {
         homeDir = new File(rootDir, "home");
         // Container creation uses home/xuser-N. Ensure its parent exists even on
         // freshly installed or partially migrated root filesystems.
-        if (!homeDir.isDirectory()) homeDir.mkdirs();
+        if (!FileUtils.isSymlink(homeDir) && !homeDir.isDirectory()) homeDir.mkdirs();
         loadContainers();
     }
 
@@ -80,7 +80,7 @@ public class ContainerManager {
 
         String prefix = RootFS.USER+"-";
         for (File file : files) {
-            if (!file.isDirectory() || !file.getName().startsWith(prefix)) continue;
+            if (FileUtils.isSymlink(file) || !file.isDirectory() || !file.getName().startsWith(prefix)) continue;
             try {
                 int id = Integer.parseInt(file.getName().substring(prefix.length()));
                 if (id <= 0) continue;
@@ -88,7 +88,7 @@ public class ContainerManager {
                 Container container = new Container(id);
                 container.setRootDir(file);
                 File configFile = container.getConfigFile();
-                if (!configFile.isFile()) continue;
+                if (FileUtils.isSymlink(configFile) || !configFile.isFile()) continue;
 
                 JSONObject data = new JSONObject(FileUtils.readString(configFile));
                 container.loadData(data);
@@ -102,9 +102,13 @@ public class ContainerManager {
     }
 
     private int nextAvailableContainerId() {
-        int id = maxContainerId + 1;
-        while (new File(homeDir, RootFS.USER+"-"+id).exists()) id++;
-        return id;
+        long candidate = Math.max(1L, (long)maxContainerId + 1L);
+        while (candidate <= Integer.MAX_VALUE) {
+            File path = new File(homeDir, RootFS.USER+"-"+candidate);
+            if (!path.exists() && !FileUtils.isSymlink(path)) return (int)candidate;
+            candidate++;
+        }
+        throw new IllegalStateException("No container IDs remain");
     }
 
     public synchronized boolean activateContainer(Container container) {
