@@ -248,16 +248,25 @@ public abstract class TarCompressorUtils {
             try (InputStream inStream = getCompressorInputStream(type, sourceStream);
                  ArchiveInputStream tar = new TarArchiveInputStream(inStream)) {
                 TarArchiveEntry entry;
+                int entryCount = 0;
                 while ((entry = (TarArchiveEntry)tar.getNextEntry()) != null) {
-                    if (!tar.canReadEntryData(entry)) continue;
+                    if (!tar.canReadEntryData(entry)) return false;
+                    entryCount++;
                     if (entry.isLink() && !entry.isSymbolicLink()) return false;
+                    if (!entry.isDirectory() && !entry.isSymbolicLink() && !entry.isFile()) return false;
 
                     File file = resolveArchiveEntry(root, entry.getName());
                     if (file == null) return false;
 
                     if (onExtractFileListener != null) {
                         file = onExtractFileListener.onExtractFile(file, entry.getSize());
-                        if (file == null) continue;
+                        if (file == null) {
+                            if (entry.isFile() && entry.getSize() > 0) {
+                                byte[] discard = new byte[StreamUtils.BUFFER_SIZE];
+                                while (tar.read(discard) != -1) {}
+                            }
+                            continue;
+                        }
                         file = file.getAbsoluteFile();
                         if (!isWithinDirectory(root, file) || hasSymlinkParent(root, file)) return false;
                     }
@@ -286,11 +295,12 @@ public abstract class TarCompressorUtils {
                         try (BufferedOutputStream outStream = new BufferedOutputStream(new FileOutputStream(file), StreamUtils.BUFFER_SIZE)) {
                             if (!StreamUtils.copy(tar, outStream)) return false;
                         }
+                        if (entry.getSize() >= 0 && file.length() != entry.getSize()) return false;
                     }
 
                     if (!FileUtils.isSymlink(file)) FileUtils.chmod(file, 0771);
                 }
-                return true;
+                return entryCount > 0;
             }
         }
         catch (IOException | SecurityException e) {
