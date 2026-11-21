@@ -44,8 +44,6 @@ public class ContainersFragment extends Fragment {
     private ContainerManager manager;
     private PreloaderDialog preloaderDialog;
     private static final int REQUEST_IMPORT_CONTAINER = 4101;
-    private static final int REQUEST_EXPORT_CONTAINER = 4102;
-    private Container pendingExportContainer;
 
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
@@ -146,16 +144,6 @@ public class ContainersFragment extends Fragment {
                 }
             });
         }
-        else if (requestCode == REQUEST_EXPORT_CONTAINER && pendingExportContainer != null) {
-            Container container = pendingExportContainer;
-            pendingExportContainer = null;
-            preloaderDialog.show(R.string.exporting_container);
-            manager.exportContainerAsync(container, uri, (success) -> {
-                preloaderDialog.close();
-                Toast.makeText(getContext(), success ? R.string.container_exported : R.string.container_export_failed,
-                    Toast.LENGTH_LONG).show();
-            });
-        }
     }
 
     private class ContainersAdapter extends RecyclerView.Adapter<ContainersAdapter.ViewHolder> {
@@ -226,14 +214,6 @@ public class ContainersFragment extends Fragment {
                         break;
                     case R.id.menu_item_edit:
                         activity.showFragment(new ContainerDetailFragment(container.id));
-                        break;
-                    case R.id.menu_item_export:
-                        pendingExportContainer = container;
-                        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-                        intent.addCategory(Intent.CATEGORY_OPENABLE);
-                        intent.setType("application/octet-stream");
-                        intent.putExtra(Intent.EXTRA_TITLE, container.getName().replaceAll("[^A-Za-z0-9._-]", "_") + ".tzst");
-                        startActivityForResult(intent, REQUEST_EXPORT_CONTAINER);
                         break;
                     case R.id.menu_item_duplicate:
                         ContentDialog.confirm(getContext(), R.string.do_you_want_to_duplicate_this_container, () -> {
