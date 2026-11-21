@@ -8,13 +8,13 @@ android {
         applicationId 'com.winlator'
         minSdkVersion 26
         targetSdkVersion 28
-        versionCode 33
-        versionName "11.2"
+        versionCode 34
+        versionName "1.0.0 Alpha"
     }
 
     buildTypes {
         debug {
-            minifyEnabled true
+            minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
 
             ndk {
@@ -33,6 +33,12 @@ android {
         cmake {
             version '3.22.1'
             path 'src/main/cpp/CMakeLists.txt'
+        }
+    }
+
+    applicationVariants.all { variant ->
+        variant.outputs.all {
+            outputFileName = "WinMali_1.0.0_Alpha.apk"
         }
     }
 }
