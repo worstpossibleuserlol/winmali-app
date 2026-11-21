@@ -3,6 +3,7 @@
 #include <android/log.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <dlfcn.h>
 
 #define VK_NO_PROTOTYPES 1
@@ -190,20 +191,33 @@ Java_com_winlator_core_GPUHelper_createOffscreenEGLContext(JNIEnv *env, jclass o
     EGLBoolean success;
 
     EGLDisplay eglDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    if (!eglDisplay) return 0;
+    if (eglDisplay == EGL_NO_DISPLAY) return 0;
 
     EGLint major, minor;
     success = eglInitialize(eglDisplay, &major, &minor);
     if (!success) return 0;
 
-    int numConfigs;
-    EGLConfig eglConfig;
+    int numConfigs = 0;
+    EGLConfig eglConfig = NULL;
     success = eglChooseConfig(eglDisplay, confAttribList, &eglConfig, 1, &numConfigs);
-    if (!success || numConfigs != 1) return 0;
+    if (!success || numConfigs < 1 || eglConfig == NULL) {
+        eglTerminate(eglDisplay);
+        return 0;
+    }
 
-    EGLContext eglContext = eglCreateContext(eglDisplay, eglConfig, sharedContext ? globalEGLContext : NULL, ctxAttribList);
+    EGLContext share = sharedContext ? globalEGLContext : EGL_NO_CONTEXT;
+    EGLContext eglContext = eglCreateContext(eglDisplay, eglConfig, share, ctxAttribList);
+    if (eglContext == EGL_NO_CONTEXT) {
+        eglTerminate(eglDisplay);
+        return 0;
+    }
 
-    eglMakeCurrent(eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, eglContext);
+    success = eglMakeCurrent(eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, eglContext);
+    if (!success) {
+        eglDestroyContext(eglDisplay, eglContext);
+        eglTerminate(eglDisplay);
+        return 0;
+    }
     return (jlong)eglContext;
 }
 
