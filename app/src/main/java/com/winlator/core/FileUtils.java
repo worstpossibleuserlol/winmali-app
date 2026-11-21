@@ -162,17 +162,17 @@ public abstract class FileUtils {
     }
 
     public static boolean copy(File srcFile, File dstFile, Callback<File> callback) {
+        if (srcFile == null || dstFile == null) return false;
         if (isSymlink(srcFile)) return true;
         if (srcFile.isDirectory()) {
-            if (isAscendantOf(srcFile, dstFile) || (!dstFile.exists() && !dstFile.mkdirs())) return false;
+            if (isAscendantOf(srcFile, dstFile) || (!dstFile.isDirectory() && !dstFile.mkdirs())) return false;
             if (callback != null) callback.call(dstFile);
 
             String[] filenames = srcFile.list();
-            if (filenames != null) {
-                for (String filename : filenames) {
-                    if (!copy(new File(srcFile, filename), new File(dstFile, filename), callback)) {
-                        return false;
-                    }
+            if (filenames == null) return false;
+            for (String filename : filenames) {
+                if (!copy(new File(srcFile, filename), new File(dstFile, filename), callback)) {
+                    return false;
                 }
             }
         }
@@ -260,6 +260,8 @@ public abstract class FileUtils {
         if (path == null) return "";
         path = StringUtils.removeEndSlash(path);
         int index = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        if (index < 0) return "";
+        if (index == 0) return path.substring(0, 1);
         return path.substring(0, index);
     }
 
@@ -281,12 +283,24 @@ public abstract class FileUtils {
     }
 
     public static String getFilePathFromUri(Uri uri) {
-        String path = null;
-        if (uri.getAuthority().equals("com.android.externalstorage.documents")) {
-            String[] parts = uri.getLastPathSegment().split(":");
-            if (parts[0].equalsIgnoreCase("primary")) path = Environment.getExternalStorageDirectory() + "/" + parts[1];
+        if (uri == null || !"com.android.externalstorage.documents".equals(uri.getAuthority())) return null;
+        String segment = uri.getLastPathSegment();
+        if (segment == null) return null;
+
+        String[] parts = segment.split(":", 2);
+        if (parts.length != 2 || !parts[0].equalsIgnoreCase("primary")) return null;
+
+        File storageRoot = Environment.getExternalStorageDirectory();
+        File resolved = new File(storageRoot, parts[1]);
+        try {
+            String rootPath = storageRoot.getCanonicalPath();
+            String resolvedPath = resolved.getCanonicalPath();
+            if (!resolvedPath.equals(rootPath) && !resolvedPath.startsWith(rootPath + File.separator)) return null;
+            return resolvedPath;
         }
-        return path;
+        catch (IOException e) {
+            return null;
+        }
     }
 
     public static boolean contentEquals(File origin, File target) {
