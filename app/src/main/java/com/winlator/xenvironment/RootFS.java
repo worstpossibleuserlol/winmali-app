@@ -40,7 +40,14 @@ public class RootFS {
 
     public int getVersion() {
         File rfsVersionFile = getRFSVersionFile();
-        return rfsVersionFile.exists() ? Integer.parseInt(FileUtils.readLines(rfsVersionFile).get(0)) : 0;
+        if (!rfsVersionFile.isFile()) return 0;
+        try {
+            java.util.ArrayList<String> lines = FileUtils.readLines(rfsVersionFile, true);
+            return lines.isEmpty() ? 0 : Math.max(0, Integer.parseInt(lines.get(0).trim()));
+        }
+        catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     public String getFormattedVersion() {
