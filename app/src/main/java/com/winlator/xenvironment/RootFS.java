@@ -45,7 +45,8 @@ public class RootFS {
     }
 
     public boolean isValid() {
-        return rootDir.isDirectory() && getRFSVersionFile().isFile() && getVersion() > 0;
+        return rootDir.isDirectory() && getRFSVersionFile().isFile() &&
+            getVersion() > 0 && hasCoreWineFiles(rootDir);
     }
 
     public static boolean hasCoreWineFiles(File root) {
