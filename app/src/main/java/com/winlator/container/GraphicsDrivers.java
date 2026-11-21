@@ -50,9 +50,13 @@ public abstract class GraphicsDrivers {
     }
 
     public static String[] getItems(String apiName, Context context) {
-        if (apiName.equalsIgnoreCase("VULKAN") && isMaliGPU(context)) {
-            // Turnip is a Mesa Vulkan driver for Qualcomm Adreno GPUs, not Mali GPUs.
-            return new String[]{getName(VORTEK)};
+        if (apiName.equalsIgnoreCase("VULKAN")) {
+            // GPU detection may still be running on the first settings screen.
+            // Offer Turnip only after positively identifying an Adreno renderer;
+            // unknown and Mali GPUs must not be treated as Turnip-compatible.
+            if (GPUHelper.getAdrenoModelId(context) <= 0) {
+                return new String[]{getName(VORTEK)};
+            }
         }
         return getItems(apiName);
     }
