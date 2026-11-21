@@ -77,6 +77,32 @@ public class TarCompressorUtilsTest {
     }
 
     @Test
+    public void createsCompleteArchiveAndCanExtractIt() throws IOException {
+        File source = new File(temporaryFolder.getRoot(), "source");
+        assertTrue(source.mkdirs());
+        File payload = new File(source, "payload.txt");
+        Files.write(payload.toPath(), "complete-data".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        File archive = new File(temporaryFolder.getRoot(), "created.tar.xz");
+        assertTrue(TarCompressorUtils.compress(TarCompressorUtils.Type.XZ, source, archive));
+        assertTrue(archive.isFile());
+        assertTrue(archive.length() > 0);
+
+        File extracted = new File(temporaryFolder.getRoot(), "extracted");
+        assertTrue(TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, archive, extracted));
+        assertEquals("complete-data", FileUtils.readString(new File(extracted, "source/payload.txt")));
+    }
+
+    @Test
+    public void reportsMissingSourceInsteadOfCreatingAnArchive() {
+        File missing = new File(temporaryFolder.getRoot(), "missing-source");
+        File archive = new File(temporaryFolder.getRoot(), "should-not-exist.tar.xz");
+
+        assertFalse(TarCompressorUtils.compress(TarCompressorUtils.Type.XZ, missing, archive));
+        assertFalse(archive.exists());
+    }
+
+    @Test
     public void extractsNormalRelativeFiles() throws IOException {
         File destination = new File(temporaryFolder.getRoot(), "rootfs");
         File archive = createArchive(EntrySpec.directory("wine"),
