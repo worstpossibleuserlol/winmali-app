@@ -42,6 +42,7 @@ public class TaskManagerDialog extends ContentDialog implements OnGetProcessInfo
     private Timer timer;
     private final Object lock = new Object();
     private BroadcastReceiver batteryReceiver;
+    private boolean batteryReceiverRegistered = false;
     private final BatteryInfo batteryInfo = new BatteryInfo();
     private final Panel cpuPanel;
     private final Panel memoryPanel;
@@ -99,7 +100,7 @@ public class TaskManagerDialog extends ContentDialog implements OnGetProcessInfo
         });
 
         setOnDismissListener((dialog) -> {
-            if (batteryReceiver != null) activity.unregisterReceiver(batteryReceiver);
+            unregisterBatteryReceiver();
 
             if (timer != null) {
                 timer.cancel();
@@ -128,9 +129,7 @@ public class TaskManagerDialog extends ContentDialog implements OnGetProcessInfo
             }
         };
 
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(Intent.ACTION_BATTERY_CHANGED);
-        activity.registerReceiver(batteryReceiver, filter);
+        registerBatteryReceiver();
 
         cpuPanel = createPanel(2);
         cpuPanel.setIconAt(0, R.drawable.icon_cpu);
@@ -142,6 +141,27 @@ public class TaskManagerDialog extends ContentDialog implements OnGetProcessInfo
         batteryPanel = createPanel(2);
         batteryPanel.setIconAt(0, R.drawable.icon_power);
         batteryPanel.setIconAt(1, R.drawable.icon_temperature);
+    }
+
+    private void registerBatteryReceiver() {
+        if (batteryReceiver == null || batteryReceiverRegistered) return;
+        IntentFilter filter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+        try {
+            activity.registerReceiver(batteryReceiver, filter);
+            batteryReceiverRegistered = true;
+        }
+        catch (RuntimeException ignored) {}
+    }
+
+    private void unregisterBatteryReceiver() {
+        if (batteryReceiver == null || !batteryReceiverRegistered) return;
+        try {
+            activity.unregisterReceiver(batteryReceiver);
+        }
+        catch (IllegalArgumentException ignored) {}
+        finally {
+            batteryReceiverRegistered = false;
+        }
     }
 
     private Panel createPanel(int numItems) {
@@ -225,6 +245,7 @@ public class TaskManagerDialog extends ContentDialog implements OnGetProcessInfo
 
     @Override
     public void show() {
+        registerBatteryReceiver();
         if (timer != null) {
             timer.cancel();
             timer = null;
