@@ -269,7 +269,7 @@ public abstract class FileUtils {
         try {
             Os.chmod(file.getAbsolutePath(), mode);
         }
-        catch (ErrnoException e) {}
+        catch (ErrnoException | RuntimeException e) {}
     }
 
     public static File createTempFile(File parent, String prefix) {
