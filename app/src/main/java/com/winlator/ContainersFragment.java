@@ -15,6 +15,7 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.PopupMenu;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -164,8 +165,11 @@ public class ContainersFragment extends Fragment {
                     case R.id.menu_item_remove:
                         ContentDialog.confirm(getContext(), R.string.do_you_want_to_remove_this_container, () -> {
                             preloaderDialog.show(R.string.removing_container);
-                            manager.removeContainerAsync(container, () -> {
+                            manager.removeContainerAsync(container, (removed) -> {
                                 preloaderDialog.close();
+                                if (!removed) {
+                                    Toast.makeText(getContext(), R.string.cannot_remove_active_container, Toast.LENGTH_LONG).show();
+                                }
                                 loadContainersList();
                             });
                         });
