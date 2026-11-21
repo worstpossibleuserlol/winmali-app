@@ -26,6 +26,7 @@ import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Stack;
 import java.util.UUID;
@@ -66,7 +67,12 @@ public abstract class FileUtils {
             if (inputStream == null) return null;
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
                 String line;
-                while ((line = reader.readLine()) != null) sb.append(line);
+                boolean firstLine = true;
+                while ((line = reader.readLine()) != null) {
+                    if (!firstLine) sb.append('\n');
+                    sb.append(line);
+                    firstLine = false;
+                }
                 return sb.toString();
             }
         }
@@ -103,13 +109,16 @@ public abstract class FileUtils {
     }
 
     public static boolean symlink(String linkTarget, String linkFile) {
+        if (linkTarget == null || linkFile == null || linkTarget.isEmpty() || linkFile.isEmpty()) return false;
         File destination = new File(linkFile);
         try {
             if ((destination.exists() || isSymlink(destination)) && !destination.delete()) return false;
-            Os.symlink(linkTarget, linkFile);
+            File parent = destination.getParentFile();
+            if (parent != null && !parent.isDirectory() && !parent.mkdirs()) return false;
+            Files.createSymbolicLink(destination.toPath(), Paths.get(linkTarget));
             return isSymlink(destination);
         }
-        catch (ErrnoException | SecurityException e) {
+        catch (IOException | RuntimeException e) {
             return false;
         }
     }
@@ -163,7 +172,13 @@ public abstract class FileUtils {
 
     public static boolean copy(File srcFile, File dstFile, Callback<File> callback) {
         if (srcFile == null || dstFile == null) return false;
-        if (isSymlink(srcFile)) return true;
+        if (isSymlink(srcFile)) {
+            String linkTarget = readSymlink(srcFile);
+            if (linkTarget.isEmpty()) return false;
+            File parent = dstFile.getParentFile();
+            if (parent != null && !parent.isDirectory() && !parent.mkdirs()) return false;
+            return symlink(linkTarget, dstFile.getPath());
+        }
         if (srcFile.isDirectory()) {
             if (isAscendantOf(srcFile, dstFile) || (!dstFile.isDirectory() && !dstFile.mkdirs())) return false;
             if (callback != null) callback.call(dstFile);
