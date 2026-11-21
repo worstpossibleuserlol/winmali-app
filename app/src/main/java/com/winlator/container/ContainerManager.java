@@ -2,6 +2,7 @@ package com.winlator.container;
 
 import android.content.Context;
 import android.net.Uri;
+import android.net.Uri;
 import android.os.Handler;
 import android.system.ErrnoException;
 import android.system.Os;
@@ -18,6 +19,12 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.IOException;
 import java.io.FileInputStream;
 import java.io.InputStream;
@@ -26,6 +33,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.UUID;
 
 public class ContainerManager {
     private static final ExecutorService OPERATIONS = Executors.newSingleThreadExecutor(runnable -> {
@@ -257,6 +265,112 @@ public class ContainerManager {
         finally {
             if (destination != null && destination.exists()) FileUtils.delete(destination);
             if (staging != null && staging.exists()) FileUtils.delete(staging);
+        }
+    }
+
+    public void exportContainerAsync(Container container, Uri destinationUri, Callback<Boolean> callback) {
+        final Handler handler = new Handler(context.getMainLooper());
+        OPERATIONS.execute(() -> {
+            boolean success = false;
+            File archive = null;
+            try {
+                if (container != null && container.getRootDir() != null &&
+                    container.getRootDir().isDirectory() && destinationUri != null) {
+                    archive = new File(context.getCacheDir(), "winmali-export-"+UUID.randomUUID()+".tar.zst");
+                    success = TarCompressorUtils.compress(TarCompressorUtils.Type.ZSTD,
+                        container.getRootDir(), archive, 3);
+                    if (success) {
+                        try (InputStream input = new BufferedInputStream(new FileInputStream(archive), 64 * 1024);
+                             OutputStream output = context.getContentResolver().openOutputStream(destinationUri, "w")) {
+                            success = output != null && com.winlator.core.StreamUtils.copy(input, output);
+                        }
+                    }
+                }
+            }
+            catch (Exception ignored) {
+                success = false;
+            }
+            finally {
+                if (archive != null) FileUtils.delete(archive);
+            }
+            final boolean result = success;
+            if (callback != null) handler.post(() -> callback.call(result));
+        });
+    }
+
+    public void importContainerAsync(Uri sourceUri, Callback<Container> callback) {
+        final Handler handler = new Handler(context.getMainLooper());
+        OPERATIONS.execute(() -> {
+            Container imported = null;
+            File staging = null;
+            try {
+                TarCompressorUtils.Type type = TarCompressorUtils.detectType(context, sourceUri);
+                if (type != null) {
+                    staging = new File(context.getCacheDir(), "winmali-import-"+UUID.randomUUID());
+                    if (staging.mkdirs() && TarCompressorUtils.extract(type, context, sourceUri, staging)) {
+                        File backupRoot = findBackupRoot(staging, 2);
+                        if (backupRoot != null) imported = installImportedContainer(backupRoot);
+                    }
+                }
+            }
+            catch (Exception ignored) {
+                imported = null;
+            }
+            finally {
+                if (staging != null) FileUtils.delete(staging);
+            }
+            final Container result = imported;
+            if (callback != null) handler.post(() -> callback.call(result));
+        });
+    }
+
+    private File findBackupRoot(File directory, int depth) {
+        if (directory == null || !directory.isDirectory()) return null;
+        File config = new File(directory, ".container");
+        File wine = new File(directory, ".wine");
+        if (config.isFile() && !FileUtils.isSymlink(config) && wine.isDirectory() && !FileUtils.isSymlink(wine)) return directory;
+        if (depth <= 0) return null;
+        File[] children = directory.listFiles();
+        if (children == null) return null;
+        for (File child : children) {
+            if (child.isDirectory() && !FileUtils.isSymlink(child)) {
+                File found = findBackupRoot(child, depth - 1);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private synchronized Container installImportedContainer(File backupRoot) {
+        if (backupRoot == null || !backupRoot.isDirectory()) return null;
+        try {
+            JSONObject data = new JSONObject(FileUtils.readString(new File(backupRoot, ".container")));
+            Container container = new Container(nextAvailableContainerId());
+            container.loadData(data);
+
+            if (!WineInfo.isMainWineVersion(container.getWineVersion())) {
+                WineInfo info = WineInfo.fromIdentifier(context, container.getWineVersion());
+                File installedWineDir = RootFS.find(context).getInstalledWineDir();
+                File runtime = new File(installedWineDir, container.getWineVersion());
+                File pattern = new File(installedWineDir, "container-pattern-"+info.fullVersion()+".tzst");
+                if (!runtime.isDirectory() || !pattern.isFile()) return null;
+            }
+
+            File destination = new File(homeDir, RootFS.USER+"-"+container.id);
+            if (destination.exists() || !destination.mkdirs()) return null;
+            if (!FileUtils.copy(backupRoot, destination, (file) -> FileUtils.chmod(file, 0771))) {
+                FileUtils.delete(destination);
+                return null;
+            }
+
+            container.setRootDir(destination);
+            container.saveData();
+            containers.add(container);
+            maxContainerId = Math.max(maxContainerId, container.id);
+            return container;
+        }
+        catch (JSONException | RuntimeException e) {
+            return null;
         }
     }
 

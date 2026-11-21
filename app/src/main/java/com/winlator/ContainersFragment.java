@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.LayoutInflater;
@@ -97,7 +98,24 @@ public class ContainersFragment extends Fragment {
             startActivityForResult(intent, REQUEST_IMPORT_CONTAINER);
             return true;
         }
-        if (menuItem.getItemId() == R.id.menu_item_add) {
+        if (menuItem.getItemId() == R.id.menu_item_import) {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("*/*");
+            ((MainActivity)getActivity()).setOpenFileCallback((uri) -> {
+                preloaderDialog.show(R.string.importing_container);
+                manager.importContainerAsync(uri, (container) -> {
+                    preloaderDialog.close();
+                    if (container == null) {
+                        Toast.makeText(getContext(), R.string.container_import_failed, Toast.LENGTH_LONG).show();
+                    }
+                    loadContainersList();
+                });
+            });
+            startActivityForResult(intent, MainActivity.OPEN_FILE_REQUEST_CODE);
+            return true;
+        }
+        else if (menuItem.getItemId() == R.id.menu_item_add) {
             if (!RootFS.find(getContext()).isValid()) return false;
             FragmentManager fragmentManager = getParentFragmentManager();
             fragmentManager.beginTransaction()
@@ -189,6 +207,20 @@ public class ContainersFragment extends Fragment {
 
             listItemMenu.setOnMenuItemClickListener((menuItem) -> {
                 switch (menuItem.getItemId()) {
+                    case R.id.menu_item_export:
+                        Intent exportIntent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                        exportIntent.addCategory(Intent.CATEGORY_OPENABLE);
+                        exportIntent.setType("application/zstd");
+                        exportIntent.putExtra(Intent.EXTRA_TITLE, container.getName().replaceAll("[^A-Za-z0-9._-]", "_")+".winmali.tar.zst");
+                        activity.setOpenFileCallback((uri) -> {
+                            preloaderDialog.show(R.string.exporting_container);
+                            manager.exportContainerAsync(container, uri, (success) -> {
+                                preloaderDialog.close();
+                                Toast.makeText(getContext(), success ? R.string.container_exported : R.string.container_export_failed, Toast.LENGTH_LONG).show();
+                            });
+                        });
+                        startActivityForResult(exportIntent, MainActivity.OPEN_FILE_REQUEST_CODE);
+                        break;
                     case R.id.menu_item_file_manager:
                         activity.showFragment(new ContainerFileManagerFragment(container.id));
                         break;

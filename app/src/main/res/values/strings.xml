@@ -13,6 +13,13 @@
     <string name="edit_container">Edit Container</string>
     <string name="creating_container">Creating Container...</string>
     <string name="removing_container">Removing Container...</string>
+    <string name="import_container">Import Container</string>
+    <string name="export_container">Export Container</string>
+    <string name="importing_container">Importing container backup...</string>
+    <string name="exporting_container">Creating container backup...</string>
+    <string name="container_exported">Container backup exported.</string>
+    <string name="container_export_failed">Unable to export container backup.</string>
+    <string name="container_import_failed">Unable to import this backup. Check that it is a valid WinMali container archive and that its Wine runtime is installed.</string>
     <string name="cannot_remove_active_container">Cannot remove the active container. Stop its session first.</string>
     <string name="duplicating_container">Duplicating Container...</string>
     <string name="import_container">Import Container</string>
