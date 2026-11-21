@@ -178,12 +178,12 @@ public abstract class TarCompressorUtils {
 
     private static boolean extract(Type type, InputStream source, File destination, OnExtractFileListener onExtractFileListener) {
         if (source == null || destination == null) return false;
-        try {
+        try (InputStream sourceStream = source) {
             if (FileUtils.isSymlink(destination)) return false;
             if (!destination.isDirectory() && !destination.mkdirs()) return false;
             File root = destination.getCanonicalFile();
 
-            try (InputStream inStream = getCompressorInputStream(type, source);
+            try (InputStream inStream = getCompressorInputStream(type, sourceStream);
                  ArchiveInputStream tar = new TarArchiveInputStream(inStream)) {
                 TarArchiveEntry entry;
                 while ((entry = (TarArchiveEntry)tar.getNextEntry()) != null) {
