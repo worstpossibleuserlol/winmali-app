@@ -18,6 +18,9 @@ import java.io.InputStreamReader;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
@@ -232,38 +235,41 @@ public abstract class ProcessHelper {
         return result.toArray(new String[0]);
     }
 
-    public static String getAffinityMaskAsHexString(String cpuList) {
-        String[] values = cpuList.split(",");
+    public static int getAffinityMaskAsInt(String cpuList) {
+        if (cpuList == null || cpuList.trim().isEmpty()) return 0;
         int affinityMask = 0;
-        for (String value : values) {
-            byte index = Byte.parseByte(value);
-            affinityMask |= (int)Math.pow(2, index);
-        }
-        return Integer.toHexString(affinityMask);
-    }
-
-    public static int getAffinityMask(String cpuList) {
-        if (cpuList == null || cpuList.isEmpty()) return 0;
-        String[] values = cpuList.split(",");
-        int affinityMask = 0;
-        for (String value : values) {
-            byte index = Byte.parseByte(value);
-            affinityMask |= (int)Math.pow(2, index);
+        for (String value : cpuList.split(",")) {
+            try {
+                int index = Integer.parseInt(value.trim());
+                if (index >= 0 && index < Integer.SIZE) affinityMask |= (1 << index);
+            }
+            catch (NumberFormatException ignored) {}
         }
         return affinityMask;
     }
 
+    public static String getAffinityMaskAsHexString(String cpuList) {
+        return Integer.toHexString(getAffinityMaskAsInt(cpuList));
+    }
+
+    public static int getAffinityMask(String cpuList) {
+        return getAffinityMaskAsInt(cpuList);
+    }
+
     public static int getAffinityMask(boolean[] cpuList) {
+        if (cpuList == null) return 0;
         int affinityMask = 0;
-        for (int i = 0; i < cpuList.length; i++) {
-            if (cpuList[i]) affinityMask |= (int)Math.pow(2, i);
+        for (int i = 0; i < cpuList.length && i < Integer.SIZE; i++) {
+            if (cpuList[i]) affinityMask |= (1 << i);
         }
         return affinityMask;
     }
 
     public static int getAffinityMask(int from, int to) {
         int affinityMask = 0;
-        for (int i = from; i < to; i++) affinityMask |= (int)Math.pow(2, i);
+        int start = Math.max(0, from);
+        int end = Math.min(Integer.SIZE, to);
+        for (int i = start; i < end; i++) affinityMask |= (1 << i);
         return affinityMask;
     }
 
@@ -358,30 +364,50 @@ public abstract class ProcessHelper {
         }
     }
 
+    static List<PStat> collectDescendants(List<PStat> processes, int rootPID) {
+        if (processes == null || processes.isEmpty()) return Collections.emptyList();
+
+        Set<Integer> descendantPids = new HashSet<>();
+        descendantPids.add(rootPID);
+        ArrayList<PStat> descendants = new ArrayList<>();
+        boolean changed;
+        do {
+            changed = false;
+            for (PStat process : processes) {
+                if (process == null || process.pid <= 0 || process.pid == rootPID ||
+                    descendantPids.contains(process.pid)) continue;
+                if (descendantPids.contains(process.parentPID)) {
+                    descendantPids.add(process.pid);
+                    descendants.add(process);
+                    changed = true;
+                }
+            }
+        } while (changed);
+
+        descendants.sort(Comparator.comparingInt(process -> process.pid));
+        return descendants;
+    }
+
     public static List<PStat> getChildProcesses() {
         File procFile = new File("/proc");
         String[] pids = procFile.list((file, name) -> (new File(file, name)).isDirectory() && name.matches("[0-9]+"));
         if (pids == null) return Collections.emptyList();
-        ArrayList<PStat> result = new ArrayList<>();
-        int parentPID = Os.getpid();
 
+        ArrayList<PStat> processes = new ArrayList<>();
         for (String pid : pids) {
             try {
-                PStat pstat = parseProcessStat(FileUtils.readString(new File("/proc/"+pid+"/stat")));
+                PStat pstat = parseProcessStat(FileUtils.readString(new File("/proc/" + pid + "/stat")));
                 if (pstat == null) continue;
-
-                if (pstat.parentPID == parentPID || pstat.pid > parentPID) {
-                    pstat.name = getProcessName(pstat.pid);
-                    if (pstat.name.isEmpty()) pstat.name = pstat.shortName;
-                    pstat.guestProcess = pstat.name.contains("wine") || pstat.name.contains(".exe");
-                    result.add(pstat);
-                }
+                pstat.name = getProcessName(pstat.pid);
+                if (pstat.name.isEmpty()) pstat.name = pstat.shortName;
+                pstat.guestProcess = pstat.name.contains("wine") || pstat.name.contains(".exe");
+                processes.add(pstat);
             }
             catch (RuntimeException ignored) {
                 // A process may exit after /proc was enumerated. Keep the other results.
             }
         }
 
-        return result;
+        return collectDescendants(processes, Os.getpid());
     }
 }
