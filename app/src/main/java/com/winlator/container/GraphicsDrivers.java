@@ -49,14 +49,14 @@ public abstract class GraphicsDrivers {
         else return new String[0];
     }
 
+    public static boolean supportsTurnip(Context context) {
+        return GPUHelper.getAdrenoModelId(context) > 0;
+    }
+
     public static String[] getItems(String apiName, Context context) {
-        if (apiName.equalsIgnoreCase("VULKAN")) {
-            // GPU detection may still be running on the first settings screen.
-            // Offer Turnip only after positively identifying an Adreno renderer;
-            // unknown and Mali GPUs must not be treated as Turnip-compatible.
-            if (GPUHelper.getAdrenoModelId(context) <= 0) {
-                return new String[]{getName(VORTEK)};
-            }
+        if (apiName.equalsIgnoreCase("VULKAN") && !supportsTurnip(context)) {
+            // Unknown and Mali GPUs must not be treated as Turnip-compatible.
+            return new String[]{getName(VORTEK)};
         }
         return getItems(apiName);
     }
