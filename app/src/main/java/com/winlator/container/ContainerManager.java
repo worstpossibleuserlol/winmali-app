@@ -17,6 +17,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.concurrent.ExecutorService;
@@ -129,14 +130,16 @@ public class ContainerManager {
         });
     }
 
-    public void removeContainerAsync(Container container, Runnable callback) {
+    public void removeContainerAsync(Container container, Callback<Boolean> callback) {
         final Handler handler = new Handler(context.getMainLooper());
         OPERATIONS.execute(() -> {
+            boolean removed = false;
             try {
-                removeContainer(container);
+                removed = removeContainer(container);
             }
             catch (RuntimeException ignored) {}
-            if (callback != null) handler.post(callback);
+            final boolean result = removed;
+            if (callback != null) handler.post(() -> callback.call(result));
         });
     }
 
@@ -208,8 +211,32 @@ public class ContainerManager {
         containers.add(dstContainer);
     }
 
-    private synchronized void removeContainer(Container container) {
-        if (FileUtils.delete(container.getRootDir())) containers.remove(container);
+    private synchronized boolean removeContainer(Container container) {
+        if (container == null || container.getRootDir() == null ||
+            FileUtils.isSymlink(container.getRootDir()) || isActiveContainer(container)) return false;
+
+        if (FileUtils.delete(container.getRootDir())) {
+            containers.remove(container);
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isActiveContainer(Container container) {
+        File activeLink = new File(homeDir, RootFS.USER);
+        if (!FileUtils.isSymlink(activeLink)) return false;
+
+        String linkTarget = FileUtils.readSymlink(activeLink);
+        if (linkTarget.isEmpty()) return false;
+        File target = new File(linkTarget);
+        if (!target.isAbsolute()) target = new File(homeDir, linkTarget);
+
+        try {
+            return target.getCanonicalFile().equals(container.getRootDir().getCanonicalFile());
+        }
+        catch (IOException e) {
+            return false;
+        }
     }
 
     public ArrayList<Shortcut> loadShortcuts(Shortcut selectedFolder) {
