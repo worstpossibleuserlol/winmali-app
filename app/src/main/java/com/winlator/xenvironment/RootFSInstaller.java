@@ -22,10 +22,17 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 
 public abstract class RootFSInstaller {
+    private static final ExecutorService OPERATIONS = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "WinMali-rootfs-operations");
+        thread.setDaemon(true);
+        return thread;
+    });
+
     public static final byte LATEST_VERSION = 23; // TODO increment it on rootfs update
     public static final byte UPDATE_WINEPREFIX_VERSION = 16; // set it if main wine version change
     public static final String FILENAME = "rootfs.tzst";
@@ -53,7 +60,7 @@ public abstract class RootFSInstaller {
 
         final DownloadProgressDialog dialog = new DownloadProgressDialog(activity);
         dialog.show(R.string.installing_system_files);
-        Executors.newSingleThreadExecutor().execute(() -> {
+        OPERATIONS.execute(() -> {
             clearRootDir(rootDir);
             final long contentLength = TarCompressorUtils.getContentLength(TarCompressorUtils.Type.ZSTD, activity, FILENAME, rootDir);
             AtomicLong totalSizeRef = new AtomicLong();
