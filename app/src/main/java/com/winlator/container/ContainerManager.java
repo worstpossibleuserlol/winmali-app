@@ -27,11 +27,15 @@ import java.io.OutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.UUID;
 
 public class ContainerManager {
+    private static final Set<Integer> ACTIVE_CONTAINER_IDS = Collections.synchronizedSet(new HashSet<>());
+
     private static final ExecutorService OPERATIONS = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "WinMali-container-operations");
         thread.setDaemon(true);
@@ -106,6 +110,7 @@ public class ContainerManager {
             // Rename replaces the previous symlink atomically; no delete-before-create gap.
             Os.rename(temporaryLink.getPath(), activeLink.getPath());
             container.setRootDir(new File(homeDir, RootFS.USER+"-"+container.id));
+            ACTIVE_CONTAINER_IDS.add(container.id);
             return true;
         }
         catch (ErrnoException e) {
@@ -340,21 +345,28 @@ public class ContainerManager {
         return false;
     }
 
-    private boolean isActiveContainer(Container container) {
-        File activeLink = new File(homeDir, RootFS.USER);
-        if (!FileUtils.isSymlink(activeLink)) return false;
+    public synchronized void deactivateContainer(Container container) {
+        if (container == null) return;
+        ACTIVE_CONTAINER_IDS.remove(container.id);
 
+        File activeLink = new File(homeDir, RootFS.USER);
+        if (!FileUtils.isSymlink(activeLink)) return;
         String linkTarget = FileUtils.readSymlink(activeLink);
-        if (linkTarget.isEmpty()) return false;
+        if (linkTarget.isEmpty()) return;
         File target = new File(linkTarget);
         if (!target.isAbsolute()) target = new File(homeDir, linkTarget);
 
         try {
-            return target.getCanonicalFile().equals(container.getRootDir().getCanonicalFile());
+            if (container.getRootDir() != null &&
+                target.getCanonicalFile().equals(container.getRootDir().getCanonicalFile())) {
+                FileUtils.delete(activeLink);
+            }
         }
-        catch (IOException e) {
-            return false;
-        }
+        catch (IOException ignored) {}
+    }
+
+    private boolean isActiveContainer(Container container) {
+        return container != null && ACTIVE_CONTAINER_IDS.contains(container.id);
     }
 
     public ArrayList<Shortcut> loadShortcuts(Shortcut selectedFolder) {
