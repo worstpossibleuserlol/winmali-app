@@ -100,13 +100,8 @@ public abstract class RootFSInstaller {
                 // Preserve user containers and separately installed Wine runtimes.
                 File oldHome = new File(rootDir, "home");
                 File newHome = new File(stagingDir, "home");
-                if (oldHome.isDirectory()) {
-                    if (newHome.exists()) {
-                        if (!FileUtils.copy(oldHome, newHome)) throw new java.io.IOException("Unable to preserve container data");
-                    }
-                    else if (!oldHome.renameTo(newHome)) {
-                        if (!FileUtils.copy(oldHome, newHome)) throw new java.io.IOException("Unable to preserve container data");
-                    }
+                if (oldHome.isDirectory() && !FileUtils.copy(oldHome, newHome)) {
+                    throw new java.io.IOException("Unable to preserve container data");
                 }
 
                 File oldInstalledWine = new File(rootDir, "opt/installed-wine");
@@ -114,11 +109,8 @@ public abstract class RootFSInstaller {
                 File newInstalledWine = new File(newOpt, "installed-wine");
                 if (oldInstalledWine.isDirectory()) {
                     if (!newOpt.isDirectory() && !newOpt.mkdirs()) throw new java.io.IOException("Unable to prepare Wine runtime directory");
-                    if (newInstalledWine.exists()) {
-                        if (!FileUtils.copy(oldInstalledWine, newInstalledWine)) throw new java.io.IOException("Unable to preserve installed Wine runtimes");
-                    }
-                    else if (!oldInstalledWine.renameTo(newInstalledWine)) {
-                        if (!FileUtils.copy(oldInstalledWine, newInstalledWine)) throw new java.io.IOException("Unable to preserve installed Wine runtimes");
+                    if (!FileUtils.copy(oldInstalledWine, newInstalledWine)) {
+                        throw new java.io.IOException("Unable to preserve installed Wine runtimes");
                     }
                 }
 
