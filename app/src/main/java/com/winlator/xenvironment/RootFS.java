@@ -48,6 +48,16 @@ public class RootFS {
         return rootDir.isDirectory() && getRFSVersionFile().isFile() && getVersion() > 0;
     }
 
+    public static boolean hasCoreWineFiles(File root) {
+        if (root == null || !root.isDirectory()) return false;
+        File wine = new File(root, "opt/wine");
+        File bin = new File(wine, "bin");
+        boolean hasWine = new File(bin, "wine").isFile() || new File(bin, "wine64").isFile();
+        return hasWine &&
+            new File(wine, "lib/wine/x86_64-windows").isDirectory() &&
+            new File(wine, "lib/wine/i386-windows").isDirectory();
+    }
+
     public int getVersion() {
         File rfsVersionFile = getRFSVersionFile();
         if (!rfsVersionFile.isFile()) return 0;
