@@ -9,6 +9,8 @@ import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.compress.archivers.tar.TarConstants;
+import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
+import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 import org.apache.commons.compress.compressors.xz.XZCompressorInputStream;
 import org.apache.commons.compress.compressors.xz.XZCompressorOutputStream;
 import org.apache.commons.compress.compressors.zstandard.ZstdCompressorInputStream;
@@ -30,7 +32,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.concurrent.atomic.AtomicLong;
 
 public abstract class TarCompressorUtils {
-    public enum Type {XZ, ZSTD}
+    public enum Type {XZ, ZSTD, GZIP}
 
     public interface OnExtractFileListener {
         File onExtractFile(File destination, long size);
@@ -141,6 +143,27 @@ public abstract class TarCompressorUtils {
             if (!completed && destination.exists() && destination.length() == 0) destination.delete();
         }
         return completed;
+    }
+
+    public static Type detectType(Context context, Uri source) {
+        if (context == null || source == null) return null;
+        try (InputStream input = context.getContentResolver().openInputStream(source);
+             BufferedInputStream buffered = new BufferedInputStream(input)) {
+            if (input == null) return null;
+            buffered.mark(8);
+            byte[] magic = new byte[6];
+            int count = buffered.read(magic);
+            buffered.reset();
+            if (count >= 6 && (magic[0] & 0xff) == 0xfd && magic[1] == 0x37 &&
+                magic[2] == 0x7a && magic[3] == 0x58 && magic[4] == 0x5a && magic[5] == 0x00) return Type.XZ;
+            if (count >= 4 && (magic[0] & 0xff) == 0x28 && (magic[1] & 0xff) == 0xb5 &&
+                (magic[2] & 0xff) == 0x2f && (magic[3] & 0xff) == 0xfd) return Type.ZSTD;
+            if (count >= 2 && (magic[0] & 0xff) == 0x1f && (magic[1] & 0xff) == 0x8b) return Type.GZIP;
+            return null;
+        }
+        catch (IOException | RuntimeException e) {
+            return null;
+        }
     }
 
     public static boolean extract(Type type, Context context, String assetFile, File destination) {
@@ -327,7 +350,10 @@ public abstract class TarCompressorUtils {
         else if (type == Type.ZSTD) {
             return new ZstdCompressorInputStream(source);
         }
-        return null;
+        else if (type == Type.GZIP) {
+            return new GzipCompressorInputStream(source);
+        }
+        throw new IOException("Unsupported archive compression type: "+type);
     }
 
     private static OutputStream getCompressorOutputStream(Type type, File destination, int level) throws IOException {
@@ -337,6 +363,9 @@ public abstract class TarCompressorUtils {
         else if (type == Type.ZSTD) {
             return new ZstdCompressorOutputStream(new BufferedOutputStream(new FileOutputStream(destination), StreamUtils.BUFFER_SIZE), level);
         }
-        return null;
+        else if (type == Type.GZIP) {
+            return new GzipCompressorOutputStream(new BufferedOutputStream(new FileOutputStream(destination), StreamUtils.BUFFER_SIZE));
+        }
+        throw new IOException("Unsupported archive compression type: "+type);
     }
 }
