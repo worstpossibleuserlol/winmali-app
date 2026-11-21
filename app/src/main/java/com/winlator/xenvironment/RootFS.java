@@ -83,15 +83,15 @@ public class RootFS {
     }
 
     public File getInstalledWineDir() {
-        return new File(rootDir, "/opt/installed-wine");
+        return new File(rootDir, "opt/installed-wine");
     }
 
     public File getTmpDir() {
-        return new File(rootDir, "/tmp");
+        return new File(rootDir, "tmp");
     }
 
     public File getLibDir() {
-        return new File(rootDir, "/usr/lib");
+        return new File(rootDir, "usr/lib");
     }
 
     @NonNull
