@@ -121,9 +121,9 @@ public class TaskManagerDialog extends ContentDialog implements OnGetProcessInfo
                     int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, 0);
                     int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 0);
 
-                    batteryInfo.voltage = voltage / 1000.0f;
-                    batteryInfo.temperature = (int)(temperature / 10.0f);
-                    batteryInfo.level = (int)((float)level / scale * 100);
+                    batteryInfo.voltage = Math.max(0, voltage) / 1000.0f;
+                    batteryInfo.temperature = Math.max(0, temperature) / 10;
+                    batteryInfo.level = scale > 0 ? Math.max(0, Math.min(100, Math.round((level * 100.0f) / scale))) : 0;
                 }
             }
         };
@@ -225,10 +225,14 @@ public class TaskManagerDialog extends ContentDialog implements OnGetProcessInfo
 
     @Override
     public void show() {
+        if (timer != null) {
+            timer.cancel();
+            timer = null;
+        }
         update();
         activity.getWinHandler().setOnGetProcessInfoListener(this);
 
-        timer = new Timer();
+        timer = new Timer("WinMali-task-manager", true);
         timer.schedule(new TimerTask() {
             @Override
             public void run() {
@@ -300,10 +304,8 @@ public class TaskManagerDialog extends ContentDialog implements OnGetProcessInfo
             popupMenuItems.add("CPU"+i+": "+CPUStatus.formatClockSpeed(clockSpeeds[i])+"/"+CPUStatus.formatClockSpeed(currentMaxClockSpeed));
         }
 
-        float avgClockSpeed = totalClockSpeed / clockSpeeds.length;
-        byte cpuUsagePercent = (byte)((avgClockSpeed / maxClockSpeed) * 100.0f);
-
-        cpuPanel.setTitle("CPU ("+cpuUsagePercent+"%)");
+        int cpuUsagePercent = CPUStatus.getUsagePercent();
+        cpuPanel.setTitle("CPU ("+(cpuUsagePercent >= 0 ? cpuUsagePercent+"%" : "N/A")+")");
         cpuPanel.setTextAt(0, CPUStatus.formatClockSpeed(selectedClockSpeed));
         cpuPanel.setTextAt(1, CPUStatus.getTemperature()+"ºC");
         cpuPanel.setPopupMenuItems(popupMenuItems);
@@ -314,7 +316,7 @@ public class TaskManagerDialog extends ContentDialog implements OnGetProcessInfo
         ActivityManager.MemoryInfo memoryInfo = new ActivityManager.MemoryInfo();
         activityManager.getMemoryInfo(memoryInfo);
         long usedMem = memoryInfo.totalMem - memoryInfo.availMem;
-        byte memUsagePercent = (byte)(((double)usedMem / memoryInfo.totalMem) * 100.0f);
+        int memUsagePercent = memoryInfo.totalMem > 0 ? (int)Math.max(0, Math.min(100, (usedMem * 100.0d) / memoryInfo.totalMem)) : 0;
 
         memoryPanel.setTitle(activity.getString(R.string.memory)+" ("+memUsagePercent+"%)");
         memoryPanel.setTextAt(0, StringUtils.formatBytes(usedMem, false)+"/"+StringUtils.formatBytes(memoryInfo.totalMem));

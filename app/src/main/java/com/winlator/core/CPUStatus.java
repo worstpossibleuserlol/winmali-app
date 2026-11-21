@@ -1,11 +1,51 @@
 package com.winlator.core;
 
-import java.io.File;
+import java.io.BufferedReader;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.Locale;
 
 public abstract class CPUStatus {
+    private static long lastTotalCpuTicks = -1;
+    private static long lastIdleCpuTicks = -1;
+
+    public static synchronized int getUsagePercent() {
+        try (BufferedReader reader = new BufferedReader(new FileReader("/proc/stat"))) {
+            String line = reader.readLine();
+            if (line == null || !line.startsWith("cpu ")) return -1;
+
+            String[] values = line.trim().split("\\s+");
+            if (values.length < 5) return -1;
+
+            long total = 0;
+            for (int i = 1; i < values.length && i <= 8; i++) {
+                total += Long.parseLong(values[i]);
+            }
+
+            long idle = Long.parseLong(values[4]);
+            if (values.length > 5) idle += Long.parseLong(values[5]);
+
+            if (lastTotalCpuTicks < 0 || lastIdleCpuTicks < 0) {
+                lastTotalCpuTicks = total;
+                lastIdleCpuTicks = idle;
+                return -1;
+            }
+
+            long totalDelta = total - lastTotalCpuTicks;
+            long idleDelta = idle - lastIdleCpuTicks;
+            lastTotalCpuTicks = total;
+            lastIdleCpuTicks = idle;
+
+            if (totalDelta <= 0) return -1;
+            long busyDelta = Math.max(0, totalDelta - Math.max(0, idleDelta));
+            return (int)Math.max(0, Math.min(100, Math.round((busyDelta * 100.0d) / totalDelta)));
+        }
+        catch (IOException | NumberFormatException e) {
+            return -1;
+        }
+    }
+
     public static short[] getCurrentClockSpeeds() {
         int numProcessors = Runtime.getRuntime().availableProcessors();
         short[] clockSpeeds = new short[numProcessors];
