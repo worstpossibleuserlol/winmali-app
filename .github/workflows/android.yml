@@ -20,6 +20,10 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: winmali-android-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
