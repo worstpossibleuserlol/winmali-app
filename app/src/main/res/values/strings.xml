@@ -71,6 +71,15 @@
     <string name="wine_configuration">Wine Configuration</string>
     <string name="enable_csmt">Enable CSMT (Command Stream Multi-Thread)</string>
     <string name="gpu_name">GPU Name</string>
+    <string name="gpu_diagnostics">GPU Diagnostics</string>
+    <string name="gpu_diagnostics_description">Inspect the graphics hardware and APIs reported by Android. This check runs only when opened.</string>
+    <string name="gpu_diagnostics_loading">Checking GPU and graphics APIs...</string>
+    <string name="gpu_diagnostics_report">GPU type: %1$s\nRenderer: %2$s\nVendor: %3$s\nOpenGL: %4$s\nVulkan API: %5$s\nVulkan device extensions reported: %6$s\nTurnip: %7$s\n\nA detected API does not guarantee that every graphics backend or Windows application will work.</string>
+    <string name="turnip_applicable_adreno">Applicable candidate (Adreno %1$d detected)</string>
+    <string name="turnip_not_applicable">Not applicable: Turnip is Adreno-only and no Adreno GPU was identified.</string>
+    <string name="not_detected">Not detected</string>
+    <string name="unknown">Unknown</string>
+    <string name="other">Other</string>
     <string name="offscreen_rendering_mode">Offscreen Rendering Mode</string>
     <string name="enable_strict_shader_math">Enable Strict Shader Math</string>
     <string name="video_memory_size">Video Memory Size</string>
