@@ -94,6 +94,27 @@ public class TarCompressorUtilsTest {
     }
 
     @Test
+    public void backupArchivePreservesRelativeSymlinks() throws IOException {
+        File source = new File(temporaryFolder.getRoot(), "backup-source");
+        File target = new File(source, "drive_c");
+        assertTrue(target.mkdirs());
+        Files.write(new File(target, "marker.txt").toPath(),
+            "container-data".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.createSymbolicLink(new File(source, "c-drive").toPath(), java.nio.file.Paths.get("drive_c"));
+
+        File archive = new File(temporaryFolder.getRoot(), "container-backup.tzst");
+        assertTrue(TarCompressorUtils.compress(TarCompressorUtils.Type.ZSTD, source, archive));
+
+        File restored = new File(temporaryFolder.getRoot(), "backup-restored");
+        assertTrue(TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, archive, restored));
+        File restoredLink = new File(restored, "backup-source/c-drive");
+        assertTrue(Files.isSymbolicLink(restoredLink.toPath()));
+        assertEquals(java.nio.file.Paths.get("drive_c"), Files.readSymbolicLink(restoredLink.toPath()));
+        assertEquals("container-data", FileUtils.readString(
+            new File(restoredLink.getParentFile(), Files.readSymbolicLink(restoredLink.toPath()).toString() + "/marker.txt")));
+    }
+
+    @Test
     public void createsAndExtractsGzipArchive() throws IOException {
         File source = new File(temporaryFolder.getRoot(), "gzip-source");
         assertTrue(source.mkdirs());
