@@ -70,10 +70,17 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class SettingsFragment extends Fragment {
+    private static final ExecutorService BACKGROUND_OPERATIONS = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "WinMali-settings-operations");
+        thread.setDaemon(true);
+        return thread;
+    });
+
     public static final String DEFAULT_WINE_DEBUG_CHANNELS = "warn,err,fixme";
     public static final byte APP_THEME_LIGHT = 0;
     public static final byte APP_THEME_DARK = 1;
@@ -366,7 +373,7 @@ public class SettingsFragment extends Fragment {
         }
 
         preloaderDialog.show(R.string.removing_wine);
-        Executors.newSingleThreadExecutor().execute(() -> {
+        BACKGROUND_OPERATIONS.execute(() -> {
             FileUtils.delete(wineDir);
             FileUtils.delete(containerPatternFile);
             preloaderDialog.closeOnUiThread();
