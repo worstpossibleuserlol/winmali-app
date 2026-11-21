@@ -11,6 +11,7 @@ import com.winlator.core.Callback;
 import com.winlator.core.FileUtils;
 import com.winlator.core.TarCompressorUtils;
 import com.winlator.core.WineInfo;
+import com.winlator.xenvironment.RootFSInstaller;
 import com.winlator.xenvironment.RootFS;
 
 import org.json.JSONArray;
@@ -46,6 +47,11 @@ public class ContainerManager {
     private int maxContainerId = 0;
     private final File homeDir;
     private final Context context;
+    private volatile int lastCreateError = R.string.container_create_failed;
+
+    public int getLastCreateError() {
+        return lastCreateError;
+    }
 
     public ContainerManager(Context context) {
         this.context = context;
@@ -129,7 +135,10 @@ public class ContainerManager {
             try {
                 created = createContainer(data);
             }
-            catch (RuntimeException ignored) {}
+            catch (Exception error) {
+                lastCreateError = R.string.container_create_unexpected_error;
+                android.util.Log.e("WinMali-Containers", "Container creation failed", error);
+            }
             final Container result = created;
             if (callback != null) handler.post(() -> callback.call(result));
         });
@@ -270,40 +279,175 @@ public class ContainerManager {
     }
 
     private synchronized Container createContainer(JSONObject data) {
+        File stagingDir = null;
+        lastCreateError = R.string.container_create_failed;
         try {
-            if (data == null) return null;
+            if (data == null) {
+                lastCreateError = R.string.container_create_invalid_settings;
+                return null;
+            }
+
+            RootFS rootFS = RootFS.find(context);
+            if (!rootFS.isValid() || rootFS.getVersion() < RootFSInstaller.LATEST_VERSION) {
+                lastCreateError = R.string.container_create_system_files_missing;
+                return null;
+            }
+
             JSONObject containerData = new JSONObject(data.toString());
             int id = nextAvailableContainerId();
             containerData.put("id", id);
 
-            // Do not assume the rootfs installer already created /home.
-            // A missing parent makes mkdirs() on xuser-N fail and previously
-            // caused the create screen to close without explaining the failure.
-            if (!homeDir.isDirectory() && !homeDir.mkdirs()) return null;
-            if (!homeDir.isDirectory() || !homeDir.canWrite()) return null;
-
-            File containerDir = new File(homeDir, RootFS.USER+"-"+id);
-            if (containerDir.exists() || !containerDir.mkdirs()) return null;
-
-            Container container = new Container(id);
-            container.setRootDir(containerDir);
-            container.loadData(containerData);
-
-            boolean isMainWineVersion = !containerData.has("wineVersion") || WineInfo.isMainWineVersion(containerData.getString("wineVersion"));
-            if (!isMainWineVersion) container.setWineVersion(containerData.getString("wineVersion"));
-
-            if (!extractContainerPatternFile(container.getWineVersion(), containerDir)) {
-                FileUtils.delete(containerDir);
+            if (!homeDir.isDirectory() && !homeDir.mkdirs()) {
+                lastCreateError = R.string.container_create_storage_error;
+                return null;
+            }
+            if (!homeDir.isDirectory() || !homeDir.canWrite()) {
+                lastCreateError = R.string.container_create_storage_error;
                 return null;
             }
 
-            container.saveData();
-            maxContainerId = Math.max(maxContainerId, id);
+            boolean mainWine = !containerData.has("wineVersion") ||
+                WineInfo.isMainWineVersion(containerData.optString("wineVersion", null));
+            String wineVersion = mainWine ? WineInfo.MAIN_WINE_INFO.identifier() :
+                containerData.optString("wineVersion", "");
+            if (mainWine) {
+                if (!validateMainWineFiles(rootFS)) return null;
+            }
+            else if (!validateCustomWineFiles(rootFS, wineVersion)) return null;
+
+            File destination = new File(homeDir, RootFS.USER+"-"+id);
+            if (destination.exists()) {
+                lastCreateError = R.string.container_create_destination_exists;
+                return null;
+            }
+
+            stagingDir = new File(homeDir, ".winmali-create-"+UUID.randomUUID());
+            if (!stagingDir.mkdirs()) {
+                lastCreateError = R.string.container_create_storage_error;
+                return null;
+            }
+
+            Container container = new Container(id);
+            container.setRootDir(stagingDir);
+            container.loadData(containerData);
+            if (!mainWine) container.setWineVersion(wineVersion);
+
+            if (!extractContainerPatternFile(container.getWineVersion(), stagingDir)) {
+                if (lastCreateError == R.string.container_create_failed) {
+                    lastCreateError = R.string.container_create_pattern_failed;
+                }
+                return null;
+            }
+
+            File winePrefix = new File(stagingDir, ".wine");
+            File windowsDir = new File(winePrefix, "drive_c/windows");
+            if (!winePrefix.isDirectory() || !windowsDir.isDirectory()) {
+                lastCreateError = R.string.container_create_invalid_pattern;
+                return null;
+            }
+
+            if (!container.saveData()) {
+                lastCreateError = R.string.container_create_config_failed;
+                return null;
+            }
+
+            if (!stagingDir.renameTo(destination)) {
+                lastCreateError = R.string.container_create_storage_error;
+                return null;
+            }
+
+            container.setRootDir(destination);
             containers.add(container);
+            maxContainerId = Math.max(maxContainerId, id);
             return container;
         }
-        catch (JSONException e) {}
-        return null;
+        catch (JSONException error) {
+            lastCreateError = R.string.container_create_invalid_settings;
+            android.util.Log.e("WinMali-Containers", "Invalid container settings", error);
+            return null;
+        }
+        catch (IOException | RuntimeException error) {
+            lastCreateError = R.string.container_create_unexpected_error;
+            android.util.Log.e("WinMali-Containers", "Container creation error", error);
+            return null;
+        }
+        finally {
+            if (stagingDir != null && stagingDir.exists()) FileUtils.delete(stagingDir);
+        }
+    }
+
+    private boolean validateMainWineFiles(RootFS rootFS) {
+        File root = rootFS.getRootDir();
+        File wineDir = new File(root, "opt/wine");
+        File binDir = new File(wineDir, "bin");
+        if (!new File(binDir, "wine").isFile() && !new File(binDir, "wine64").isFile()) {
+            lastCreateError = R.string.container_create_wine_missing;
+            return false;
+        }
+
+        File x64 = new File(wineDir, "lib/wine/x86_64-windows");
+        File x86 = new File(wineDir, "lib/wine/i386-windows");
+        if (!x64.isDirectory() || !x86.isDirectory()) {
+            lastCreateError = R.string.container_create_wine_libraries_missing;
+            return false;
+        }
+
+        try (InputStream pattern = context.getAssets().open("container_pattern.tzst");
+             InputStream manifest = context.getAssets().open("common_dlls.json")) {
+            if (pattern.read() < 0) {
+                lastCreateError = R.string.container_create_pattern_missing;
+                return false;
+            }
+            JSONObject commonDlls = new JSONObject(readAssetText(manifest));
+            if (!hasAllDlls(x64, commonDlls.getJSONArray("system32")) ||
+                !hasAllDlls(x86, commonDlls.getJSONArray("syswow64"))) {
+                lastCreateError = R.string.container_create_wine_libraries_missing;
+                return false;
+            }
+            return true;
+        }
+        catch (IOException | JSONException error) {
+            lastCreateError = R.string.container_create_system_assets_missing;
+            android.util.Log.e("WinMali-Containers", "Missing or invalid container assets", error);
+            return false;
+        }
+    }
+
+    private String readAssetText(InputStream input) throws IOException {
+        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int count;
+        while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+        return output.toString("UTF-8");
+    }
+
+    private boolean hasAllDlls(File sourceDir, JSONArray names) throws JSONException {
+        if (names.length() == 0) return false;
+        for (int i = 0; i < names.length(); i++) {
+            String name = names.getString(i);
+            if (name.isEmpty() || name.indexOf('/') >= 0 || name.indexOf((char)92) >= 0 ||
+                !new File(sourceDir, name).isFile()) return false;
+        }
+        return true;
+    }
+
+    private boolean validateCustomWineFiles(RootFS rootFS, String wineVersion) {
+        if (wineVersion == null || !wineVersion.startsWith("wine-") ||
+            wineVersion.contains("/") || wineVersion.indexOf((char)92) >= 0 || wineVersion.contains("..")) {
+            lastCreateError = R.string.container_create_custom_runtime_missing;
+            return false;
+        }
+        WineInfo info = WineInfo.fromIdentifier(context, wineVersion);
+        File runtime = new File(rootFS.getInstalledWineDir(), wineVersion);
+        File pattern = new File(rootFS.getInstalledWineDir(), "container-pattern-"+info.fullVersion()+".tzst");
+        File bin = new File(runtime, "bin");
+        if (info.path == null || !runtime.isDirectory() ||
+            (!new File(bin, "wine").isFile() && !new File(bin, "wine64").isFile()) ||
+            !pattern.isFile() || pattern.length() == 0) {
+            lastCreateError = R.string.container_create_custom_runtime_missing;
+            return false;
+        }
+        return true;
     }
 
     private synchronized void duplicateContainer(Container srcContainer) {
@@ -458,9 +602,10 @@ public class ContainerManager {
         JSONArray dlnames = commonDlls.getJSONArray(dstName);
         for (int i = 0; i < dlnames.length(); i++) {
             String dlname = dlnames.getString(i);
+            if (dlname.isEmpty() || dlname.indexOf('/') >= 0 || dlname.indexOf((char)92) >= 0) return false;
             File srcFile = new File(srcDir, dlname);
             File dstFile = new File(containerDir, ".wine/drive_c/windows/"+dstName+"/"+dlname);
-            if (!FileUtils.copy(srcFile, dstFile)) return false;
+            if (!srcFile.isFile() || !FileUtils.copy(srcFile, dstFile)) return false;
         }
         return true;
     }
@@ -468,27 +613,31 @@ public class ContainerManager {
     private boolean extractContainerPatternFile(String wineVersion, File containerDir) {
         if (WineInfo.isMainWineVersion(wineVersion)) {
             boolean result = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context, "container_pattern.tzst", containerDir);
+            if (!result) {
+                lastCreateError = R.string.container_create_pattern_failed;
+                return false;
+            }
 
-            if (result) {
-                try {
-                    JSONObject commonDlls = new JSONObject(FileUtils.readString(context, "common_dlls.json"));
-                    if (!copyCommonDlls("x86_64-windows", "system32", commonDlls, containerDir) ||
-                        !copyCommonDlls("i386-windows", "syswow64", commonDlls, containerDir)) {
-                        return false;
-                    }
-                }
-                catch (JSONException e) {
+            try {
+                JSONObject commonDlls = new JSONObject(FileUtils.readString(context, "common_dlls.json"));
+                if (!copyCommonDlls("x86_64-windows", "system32", commonDlls, containerDir) ||
+                    !copyCommonDlls("i386-windows", "syswow64", commonDlls, containerDir)) {
+                    lastCreateError = R.string.container_create_wine_libraries_missing;
                     return false;
                 }
             }
+            catch (JSONException error) {
+                lastCreateError = R.string.container_create_system_assets_missing;
+                return false;
+            }
+            return true;
+        }
 
-            return result;
-        }
-        else {
-            File installedWineDir = RootFS.find(context).getInstalledWineDir();
-            WineInfo wineInfo = WineInfo.fromIdentifier(context, wineVersion);
-            File file = new File(installedWineDir, "container-pattern-"+wineInfo.fullVersion()+".tzst");
-            return TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, file, containerDir);
-        }
+        File installedWineDir = RootFS.find(context).getInstalledWineDir();
+        WineInfo wineInfo = WineInfo.fromIdentifier(context, wineVersion);
+        File file = new File(installedWineDir, "container-pattern-"+wineInfo.fullVersion()+".tzst");
+        boolean result = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, file, containerDir);
+        if (!result) lastCreateError = R.string.container_create_custom_runtime_missing;
+        return result;
     }
 }
