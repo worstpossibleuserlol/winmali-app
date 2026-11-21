@@ -281,15 +281,18 @@ public class ContainerManager {
         return null;
     }
 
-    private void copyCommonDlls(String srcName, String dstName, JSONObject commonDlls, File containerDir) throws JSONException {
-        File srcDir = new File(RootFS.find(context).getRootDir(), "/opt/wine/lib/wine/"+srcName);
-        JSONArray dlnames = commonDlls.getJSONArray(dstName);
+    private boolean copyCommonDlls(String srcName, String dstName, JSONObject commonDlls, File containerDir) throws JSONException {
+        File srcDir = new File(RootFS.find(context).getRootDir(), "opt/wine/lib/wine/"+srcName);
+        if (!srcDir.isDirectory()) return false;
 
+        JSONArray dlnames = commonDlls.getJSONArray(dstName);
         for (int i = 0; i < dlnames.length(); i++) {
             String dlname = dlnames.getString(i);
+            File srcFile = new File(srcDir, dlname);
             File dstFile = new File(containerDir, ".wine/drive_c/windows/"+dstName+"/"+dlname);
-            FileUtils.copy(new File(srcDir, dlname), dstFile);
+            if (!FileUtils.copy(srcFile, dstFile)) return false;
         }
+        return true;
     }
 
     private boolean extractContainerPatternFile(String wineVersion, File containerDir) {
@@ -299,8 +302,10 @@ public class ContainerManager {
             if (result) {
                 try {
                     JSONObject commonDlls = new JSONObject(FileUtils.readString(context, "common_dlls.json"));
-                    copyCommonDlls("x86_64-windows", "system32", commonDlls, containerDir);
-                    copyCommonDlls("i386-windows", "syswow64", commonDlls, containerDir);
+                    if (!copyCommonDlls("x86_64-windows", "system32", commonDlls, containerDir) ||
+                        !copyCommonDlls("i386-windows", "syswow64", commonDlls, containerDir)) {
+                        return false;
+                    }
                 }
                 catch (JSONException e) {
                     return false;
