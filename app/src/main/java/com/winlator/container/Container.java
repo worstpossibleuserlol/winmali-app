@@ -14,6 +14,10 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.Iterator;
 
 public class Container {
@@ -282,7 +286,10 @@ public class Container {
         };
     }
 
-    public void saveData() {
+    public boolean saveData() {
+        if (rootDir == null || !rootDir.isDirectory()) return false;
+        File destination = getConfigFile();
+        File temporary = new File(rootDir, ".container.tmp");
         try {
             JSONObject data = new JSONObject();
             data.put("id", id);
@@ -304,11 +311,26 @@ public class Container {
             data.put("box64Preset", box64Preset);
             data.put("desktopTheme", desktopTheme);
             data.put("extraData", extraData);
-
             if (!WineInfo.isMainWineVersion(wineVersion)) data.put("wineVersion", wineVersion);
-            FileUtils.writeString(getConfigFile(), data.toString());
+
+            if (!FileUtils.writeString(temporary, data.toString()) || !temporary.isFile() ||
+                temporary.length() == 0) return false;
+            try {
+                Files.move(temporary.toPath(), destination.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            }
+            catch (AtomicMoveNotSupportedException error) {
+                Files.move(temporary.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
+            return destination.isFile() && destination.length() > 0;
         }
-        catch (JSONException e) {}
+        catch (JSONException | IOException | RuntimeException error) {
+            android.util.Log.e("WinMali-Container", "Unable to save container configuration", error);
+            return false;
+        }
+        finally {
+            if (temporary.exists()) temporary.delete();
+        }
     }
 
     public void loadData(JSONObject data) throws JSONException {
