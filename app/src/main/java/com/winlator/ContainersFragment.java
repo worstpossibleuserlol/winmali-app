@@ -3,6 +3,7 @@ package com.winlator;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.LayoutInflater;
@@ -42,6 +43,9 @@ public class ContainersFragment extends Fragment {
     private TextView emptyTextView;
     private ContainerManager manager;
     private PreloaderDialog preloaderDialog;
+    private static final int REQUEST_IMPORT_CONTAINER = 4101;
+    private static final int REQUEST_EXPORT_CONTAINER = 4102;
+    private Container pendingExportContainer;
 
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
@@ -86,6 +90,13 @@ public class ContainersFragment extends Fragment {
 
     @Override
     public boolean onOptionsItemSelected(MenuItem menuItem) {
+        if (menuItem.getItemId() == R.id.menu_item_import) {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/octet-stream");
+            startActivityForResult(intent, REQUEST_IMPORT_CONTAINER);
+            return true;
+        }
         if (menuItem.getItemId() == R.id.menu_item_add) {
             if (!RootFS.find(getContext()).isValid()) return false;
             FragmentManager fragmentManager = getParentFragmentManager();
@@ -96,6 +107,37 @@ public class ContainersFragment extends Fragment {
             return true;
         }
         else return super.onOptionsItemSelected(menuItem);
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != Activity.RESULT_OK || data == null || data.getData() == null) return;
+
+        Uri uri = data.getData();
+        if (requestCode == REQUEST_IMPORT_CONTAINER) {
+            preloaderDialog.show(R.string.importing_container);
+            manager.importContainerAsync(uri, (container) -> {
+                preloaderDialog.close();
+                if (container == null) {
+                    Toast.makeText(getContext(), R.string.container_import_failed, Toast.LENGTH_LONG).show();
+                }
+                else {
+                    Toast.makeText(getContext(), R.string.container_imported, Toast.LENGTH_SHORT).show();
+                    loadContainersList();
+                }
+            });
+        }
+        else if (requestCode == REQUEST_EXPORT_CONTAINER && pendingExportContainer != null) {
+            Container container = pendingExportContainer;
+            pendingExportContainer = null;
+            preloaderDialog.show(R.string.exporting_container);
+            manager.exportContainerAsync(container, uri, (success) -> {
+                preloaderDialog.close();
+                Toast.makeText(getContext(), success ? R.string.container_exported : R.string.container_export_failed,
+                    Toast.LENGTH_LONG).show();
+            });
+        }
     }
 
     private class ContainersAdapter extends RecyclerView.Adapter<ContainersAdapter.ViewHolder> {
@@ -152,6 +194,14 @@ public class ContainersFragment extends Fragment {
                         break;
                     case R.id.menu_item_edit:
                         activity.showFragment(new ContainerDetailFragment(container.id));
+                        break;
+                    case R.id.menu_item_export:
+                        pendingExportContainer = container;
+                        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                        intent.addCategory(Intent.CATEGORY_OPENABLE);
+                        intent.setType("application/octet-stream");
+                        intent.putExtra(Intent.EXTRA_TITLE, container.getName().replaceAll("[^A-Za-z0-9._-]", "_") + ".tzst");
+                        startActivityForResult(intent, REQUEST_EXPORT_CONTAINER);
                         break;
                     case R.id.menu_item_duplicate:
                         ContentDialog.confirm(getContext(), R.string.do_you_want_to_duplicate_this_container, () -> {
