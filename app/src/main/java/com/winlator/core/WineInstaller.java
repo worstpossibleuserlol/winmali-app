@@ -102,10 +102,36 @@ public abstract class WineInstaller {
             File destination = new File(RootFS.find(context).getInstalledWineDir(), "/preinstall/wine");
             FileUtils.delete(destination);
             destination.mkdirs();
-            boolean success = TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, context, uri, destination);
+            TarCompressorUtils.Type archiveType = TarCompressorUtils.detectType(context, uri);
+            boolean success = archiveType != null && TarCompressorUtils.extract(archiveType, context, uri, destination);
             if (!success) FileUtils.delete(destination);
             if (callback != null) callback.call(success ? destination : null);
         });
+    }
+
+    private static File resolveWineRuntimeRoot(File extractedDir) {
+        if (extractedDir == null || !extractedDir.isDirectory()) return null;
+        if (hasWineRuntimeBinaries(extractedDir)) return extractedDir;
+
+        File[] children = extractedDir.listFiles();
+        if (children == null) return null;
+        for (File child : children) {
+            if (child.isDirectory() && hasWineRuntimeBinaries(child)) return child;
+        }
+
+        String[] knownRoots = {"files", "dist", "wine", "usr"};
+        for (String name : knownRoots) {
+            File candidate = new File(extractedDir, name);
+            if (hasWineRuntimeBinaries(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    private static boolean hasWineRuntimeBinaries(File root) {
+        File bin = new File(root, "bin");
+        File wine = new File(bin, "wine");
+        File wine64 = new File(bin, "wine64");
+        return wine.isFile() && ((wine64.isFile() && ElfHelper.is64Bit(wine64)) || ElfHelper.is64Bit(wine));
     }
 
     public static void findWineVersionAsync(Context context, File wineDir, Callback<WineInfo> callback) {
@@ -113,38 +139,13 @@ public abstract class WineInstaller {
             callback.call(null);
             return;
         }
-        File[] files = wineDir.listFiles();
-        if (files == null || files.length == 0) {
+        wineDir = resolveWineRuntimeRoot(wineDir);
+        if (wineDir == null) {
             callback.call(null);
             return;
         }
 
-        if (files.length == 1) {
-            if (!files[0].isDirectory()) {
-                callback.call(null);
-                return;
-            }
-            wineDir = files[0];
-            files = wineDir.listFiles();
-            if (files == null || files.length == 0) {
-                callback.call(null);
-                return;
-            }
-        }
-
-        File binDir = null;
-        for (File file : files) {
-            if (file.isDirectory() && file.getName().equals("bin")) {
-                binDir = file;
-                break;
-            }
-        }
-
-        if (binDir == null) {
-            callback.call(null);
-            return;
-        }
-
+        File binDir = new File(wineDir, "bin");
         File wineBin = new File(binDir, "wine");
         File wineBin64 = new File(binDir, "wine64");
 
