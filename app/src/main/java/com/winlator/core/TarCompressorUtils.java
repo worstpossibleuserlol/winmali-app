@@ -57,14 +57,14 @@ public abstract class TarCompressorUtils {
 
     private static void addDirectory(ArchiveOutputStream tar, File folder, String basePath) throws IOException {
         File[] files = folder.listFiles();
-        if (files == null) return;
+        if (files == null) throw new IOException("Unable to list archive directory: "+folder);
         for (File file : files) {
             if (FileUtils.isSymlink(file)) {
                 addLinkFile(tar, file, basePath+file.getName());
             }
             else if (file.isDirectory()) {
                 String entryName = basePath+file.getName() + "/";
-                tar.putArchiveEntry(tar.createArchiveEntry(folder, entryName));
+                tar.putArchiveEntry(tar.createArchiveEntry(file, entryName));
                 tar.closeArchiveEntry();
                 addDirectory(tar, file, entryName);
             }
@@ -87,7 +87,9 @@ public abstract class TarCompressorUtils {
 
         File temporaryFile;
         try {
-            temporaryFile = File.createTempFile(destination.getName()+".", ".partial", parent);
+            String temporaryPrefix = destination.getName()+".";
+            while (temporaryPrefix.length() < 3) temporaryPrefix += "_";
+            temporaryFile = File.createTempFile(temporaryPrefix, ".partial", parent);
         }
         catch (IOException e) {
             return false;
