@@ -21,7 +21,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
-import java.util.regex.Pattern;
 
 public abstract class ProcessHelper {
     public enum PState {RUNNING, SLEEPING, WAITING, ZOMBIE, STOPPED, DEAD, OTHER}
@@ -327,6 +326,38 @@ public abstract class ProcessHelper {
         }
     }
 
+    static PStat parseProcessStat(String statLine) {
+        if (statLine == null) return null;
+        int openParen = statLine.indexOf('(');
+        int closeParen = statLine.lastIndexOf(')');
+        if (openParen <= 0 || closeParen <= openParen) return null;
+
+        try {
+            PStat pstat = new PStat();
+            pstat.pid = Integer.parseInt(statLine.substring(0, openParen).trim());
+            pstat.shortName = statLine.substring(openParen + 1, closeParen);
+            String remaining = statLine.substring(closeParen + 1).trim();
+            String[] fields = remaining.split("\\s+");
+            if (fields.length < 2) return null;
+
+            switch (fields[0]) {
+                case "R": pstat.state = PState.RUNNING; break;
+                case "S": pstat.state = PState.SLEEPING; break;
+                case "D": pstat.state = PState.WAITING; break;
+                case "Z": pstat.state = PState.ZOMBIE; break;
+                case "T": pstat.state = PState.STOPPED; break;
+                case "X":
+                case "x": pstat.state = PState.DEAD; break;
+                default: pstat.state = PState.OTHER; break;
+            }
+            pstat.parentPID = Integer.parseInt(fields[1]);
+            return pstat;
+        }
+        catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     public static List<PStat> getChildProcesses() {
         File procFile = new File("/proc");
         String[] pids = procFile.list((file, name) -> (new File(file, name)).isDirectory() && name.matches("[0-9]+"));
@@ -335,50 +366,9 @@ public abstract class ProcessHelper {
         int parentPID = Os.getpid();
 
         for (String pid : pids) {
-            try (Scanner scanner = new Scanner(new FileInputStream("/proc/"+pid+"/stat"))) {
-                PStat pstat = new PStat();
-                int index = 0;
-
-                while (scanner.hasNext() && index < 4) {
-                    switch (index++) {
-                        case 0:
-                            pstat.pid = scanner.nextInt();
-                            break;
-                        case 1:
-                            Pattern oldDelimiter = scanner.delimiter();
-                            scanner.useDelimiter("\\)");
-                            pstat.shortName = scanner.hasNext() ? scanner.next().substring(2) : "";
-                            scanner.useDelimiter(oldDelimiter);
-                            if (scanner.hasNext()) scanner.next();
-                            break;
-                        case 2: {
-                            switch (scanner.next()) {
-                                case "R":
-                                    pstat.state = PState.RUNNING;
-                                    break;
-                                case "S":
-                                    pstat.state = PState.SLEEPING;
-                                    break;
-                                case "D":
-                                    pstat.state = PState.WAITING;
-                                    break;
-                                case "Z":
-                                    pstat.state = PState.ZOMBIE;
-                                    break;
-                                case "T":
-                                    pstat.state = PState.STOPPED;
-                                    break;
-                                case "X":
-                                    pstat.state = PState.DEAD;
-                                    break;
-                            }
-                            break;
-                        }
-                        case 3:
-                            pstat.parentPID = scanner.nextInt();
-                            break;
-                    }
-                }
+            try {
+                PStat pstat = parseProcessStat(FileUtils.readString(new File("/proc/"+pid+"/stat")));
+                if (pstat == null) continue;
 
                 if (pstat.parentPID == parentPID || pstat.pid > parentPID) {
                     pstat.name = getProcessName(pstat.pid);
@@ -387,7 +377,7 @@ public abstract class ProcessHelper {
                     result.add(pstat);
                 }
             }
-            catch (Exception ignored) {
+            catch (RuntimeException ignored) {
                 // A process may exit after /proc was enumerated. Keep the other results.
             }
         }
