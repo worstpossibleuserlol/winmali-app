@@ -258,7 +258,7 @@ public class ContainerDetailFragment extends Fragment {
                         preloaderDialog.close();
                         if (!isAdded()) return;
                         if (container == null) {
-                            Toast.makeText(context, R.string.container_create_failed, Toast.LENGTH_LONG).show();
+                            Toast.makeText(context, manager.getLastCreateError(), Toast.LENGTH_LONG).show();
                             return;
                         }
                         this.container = container;
@@ -268,7 +268,10 @@ public class ContainerDetailFragment extends Fragment {
                     });
                 }
             }
-            catch (JSONException e) {}
+            catch (JSONException e) {
+                android.util.Log.e("WinMali-Containers", "Unable to serialize container settings", e);
+                Toast.makeText(context, R.string.container_create_invalid_settings, Toast.LENGTH_LONG).show();
+            }
         });
         return view;
     }
