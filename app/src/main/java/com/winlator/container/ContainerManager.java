@@ -370,7 +370,7 @@ public class ContainerManager {
             android.util.Log.e("WinMali-Containers", "Invalid container settings", error);
             return null;
         }
-        catch (IOException | RuntimeException error) {
+        catch (RuntimeException error) {
             lastCreateError = R.string.container_create_unexpected_error;
             android.util.Log.e("WinMali-Containers", "Container creation error", error);
             return null;
