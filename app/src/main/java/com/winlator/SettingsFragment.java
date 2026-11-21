@@ -48,6 +48,7 @@ import com.winlator.core.ArrayUtils;
 import com.winlator.core.Callback;
 import com.winlator.core.DefaultVersion;
 import com.winlator.core.FileUtils;
+import com.winlator.core.GPUHelper;
 import com.winlator.core.GeneralComponents;
 import com.winlator.core.LocaleHelper;
 import com.winlator.core.PreloaderDialog;
@@ -68,6 +69,7 @@ import org.json.JSONException;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -112,6 +114,8 @@ public class SettingsFragment extends Fragment {
         View view = inflater.inflate(R.layout.settings_fragment, container, false);
         final Context context = getContext();
         preferences = PreferenceManager.getDefaultSharedPreferences(context);
+
+        view.findViewById(R.id.BTGPUDiagnostics).setOnClickListener((v) -> showGPUDiagnostics(context));
 
         final Spinner sSoundFont = view.findViewById(R.id.SSoundFont);
         String soundfont = preferences.getString("soundfont", null);
@@ -451,6 +455,73 @@ public class SettingsFragment extends Fragment {
 
         dialog.setOnConfirmCallback(() -> installWine(wineInfo));
         dialog.show();
+    }
+
+    private void showGPUDiagnostics(Context context) {
+        ContentDialog dialog = new ContentDialog(context, R.layout.gpu_diagnostics_dialog);
+        dialog.setTitle(R.string.gpu_diagnostics);
+        dialog.findViewById(R.id.BTCancel).setVisibility(View.GONE);
+        dialog.setOnConfirmCallback(() -> {});
+        TextView information = dialog.findViewById(R.id.TVGPUInfo);
+        information.setText(R.string.gpu_diagnostics_loading);
+        dialog.show();
+
+        Context appContext = context.getApplicationContext();
+        if (appContext == null) appContext = context;
+        final Context queryContext = appContext;
+
+        Thread worker = new Thread(() -> {
+            String renderer = "";
+            String vendor = "";
+            String glVersion = "";
+            int vulkanVersion = 0;
+            int extensionCount = -1;
+            int adrenoModel = 0;
+
+            try {
+                renderer = GPUHelper.glGetRenderer(queryContext);
+                vendor = GPUHelper.glGetVendor(queryContext);
+                glVersion = GPUHelper.glGetVersion(queryContext);
+                adrenoModel = GPUHelper.getAdrenoModelId(queryContext);
+            }
+            catch (LinkageError | RuntimeException ignored) {}
+
+            try {
+                vulkanVersion = GPUHelper.vkGetApiVersion();
+                String[] extensions = GPUHelper.vkGetDeviceExtensions();
+                extensionCount = extensions != null ? extensions.length : -1;
+            }
+            catch (LinkageError | RuntimeException ignored) {}
+
+            String notDetected = queryContext.getString(R.string.not_detected);
+            String safeRenderer = renderer != null && !renderer.trim().isEmpty() ? renderer.trim() : notDetected;
+            String safeVendor = vendor != null && !vendor.trim().isEmpty() ? vendor.trim() : notDetected;
+            String safeGLVersion = glVersion != null && !glVersion.trim().isEmpty() ? glVersion.trim() : notDetected;
+            String lowerRenderer = safeRenderer.toLowerCase(Locale.ENGLISH);
+            String lowerVendor = safeVendor.toLowerCase(Locale.ENGLISH);
+            String gpuType;
+            if (lowerRenderer.contains("mali")) gpuType = "Mali";
+            else if (adrenoModel > 0 || lowerRenderer.contains("adreno")) gpuType = "Adreno";
+            else if (lowerVendor.contains("arm")) gpuType = "ARM (GPU model not confirmed)";
+            else gpuType = safeRenderer.equals(notDetected) ? queryContext.getString(R.string.unknown) : queryContext.getString(R.string.other);
+
+            String vulkanText = vulkanVersion > 0
+                ? GPUHelper.vkVersionMajor(vulkanVersion)+"."+GPUHelper.vkVersionMinor(vulkanVersion)+"."+GPUHelper.vkVersionPatch(vulkanVersion)
+                : notDetected;
+            String extensionsText = extensionCount >= 0 ? String.valueOf(extensionCount) : notDetected;
+            String turnipText = adrenoModel > 0
+                ? queryContext.getString(R.string.turnip_applicable_adreno, adrenoModel)
+                : queryContext.getString(R.string.turnip_not_applicable);
+
+            String report = queryContext.getString(R.string.gpu_diagnostics_report,
+                gpuType, safeRenderer, safeVendor, safeGLVersion, vulkanText, extensionsText, turnipText);
+
+            information.post(() -> {
+                if (information.getWindowToken() != null) information.setText(report);
+            });
+        }, "WinMali-gpu-diagnostics");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     private void loadWineDebugChannels(final View view, final ArrayList<String> debugChannels) {
