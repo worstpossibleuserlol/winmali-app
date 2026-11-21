@@ -53,3 +53,13 @@ dependencies {
     implementation 'org.apache.commons:commons-compress:1.28.0'
     implementation 'androidx.lifecycle:lifecycle-process:2.5.1'
 }
+
+tasks.withType(Test).configureEach {
+    testLogging {
+        events "failed"
+        exceptionFormat "full"
+        showExceptions true
+        showCauses true
+        showStackTraces true
+    }
+}
