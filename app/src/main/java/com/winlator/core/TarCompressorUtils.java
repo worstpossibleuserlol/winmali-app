@@ -145,39 +145,93 @@ public abstract class TarCompressorUtils {
         }
     }
 
+    private static boolean isWithinDirectory(File directory, File candidate) throws IOException {
+        String rootPath = directory.getCanonicalPath();
+        String candidatePath = candidate.getCanonicalPath();
+        return candidatePath.equals(rootPath) || candidatePath.startsWith(rootPath + File.separator);
+    }
+
+    private static boolean hasParentTraversal(String path) {
+        if (path == null || path.isEmpty() || path.startsWith("/") || path.matches("^[A-Za-z]:.*")) return true;
+        String[] parts = path.replace('\\\\', '/').split("/");
+        for (String part : parts) {
+            if ("..".equals(part)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasSymlinkParent(File root, File file) {
+        File parent = file.getAbsoluteFile().getParentFile();
+        while (parent != null && !parent.equals(root)) {
+            if (FileUtils.isSymlink(parent)) return true;
+            parent = parent.getParentFile();
+        }
+        return false;
+    }
+
+    private static File resolveArchiveEntry(File root, String entryName) throws IOException {
+        if (hasParentTraversal(entryName)) return null;
+        File file = new File(root, entryName);
+        if (!isWithinDirectory(root, file) || hasSymlinkParent(root, file)) return null;
+        return file;
+    }
+
     private static boolean extract(Type type, InputStream source, File destination, OnExtractFileListener onExtractFileListener) {
-        if (source == null) return false;
-        try (InputStream inStream = getCompressorInputStream(type, source);
-             ArchiveInputStream tar = new TarArchiveInputStream(inStream)) {
-            TarArchiveEntry entry;
-            while ((entry = (TarArchiveEntry)tar.getNextEntry()) != null) {
-                if (!tar.canReadEntryData(entry)) continue;
-                File file = new File(destination, entry.getName());
+        if (source == null || destination == null) return false;
+        try {
+            if (FileUtils.isSymlink(destination)) return false;
+            if (!destination.isDirectory() && !destination.mkdirs()) return false;
+            File root = destination.getCanonicalFile();
 
-                if (onExtractFileListener != null) {
-                    file = onExtractFileListener.onExtractFile(file, entry.getSize());
-                    if (file == null) continue;
-                }
+            try (InputStream inStream = getCompressorInputStream(type, source);
+                 ArchiveInputStream tar = new TarArchiveInputStream(inStream)) {
+                TarArchiveEntry entry;
+                while ((entry = (TarArchiveEntry)tar.getNextEntry()) != null) {
+                    if (!tar.canReadEntryData(entry)) continue;
+                    if (entry.isLink() && !entry.isSymbolicLink()) return false;
 
-                if (entry.isDirectory()) {
-                    if (!file.isDirectory()) file.mkdirs();
-                }
-                else {
-                    if (entry.isSymbolicLink()) {
-                        FileUtils.symlink(entry.getLinkName(), file.getAbsolutePath());
+                    File file = resolveArchiveEntry(root, entry.getName());
+                    if (file == null) return false;
+
+                    if (onExtractFileListener != null) {
+                        file = onExtractFileListener.onExtractFile(file, entry.getSize());
+                        if (file == null) continue;
+                        file = file.getAbsoluteFile();
+                        if (!isWithinDirectory(root, file) || hasSymlinkParent(root, file)) return false;
+                    }
+
+                    if (entry.isDirectory()) {
+                        if (file.exists() && !file.isDirectory()) return false;
+                        if (!file.isDirectory() && !file.mkdirs()) return false;
+                    }
+                    else if (entry.isSymbolicLink()) {
+                        String linkName = entry.getLinkName();
+                        if (linkName == null || linkName.isEmpty() || new File(linkName).isAbsolute()) return false;
+
+                        File linkTarget = new File(file.getParentFile(), linkName);
+                        if (!isWithinDirectory(root, linkTarget)) return false;
+                        if (file.exists() || FileUtils.isSymlink(file)) {
+                            if (!FileUtils.delete(file)) return false;
+                        }
+                        if (!FileUtils.symlink(linkName, file.getAbsolutePath())) return false;
                     }
                     else {
+                        File parent = file.getParentFile();
+                        if (parent == null || (!parent.isDirectory() && !parent.mkdirs())) return false;
+                        if (!isWithinDirectory(root, file) || hasSymlinkParent(root, file)) return false;
+                        if (FileUtils.isSymlink(file) || (file.exists() && !file.isFile())) return false;
+
                         try (BufferedOutputStream outStream = new BufferedOutputStream(new FileOutputStream(file), StreamUtils.BUFFER_SIZE)) {
                             if (!StreamUtils.copy(tar, outStream)) return false;
                         }
                     }
-                }
 
-                FileUtils.chmod(file, 0771);
+                    if (!FileUtils.isSymlink(file)) FileUtils.chmod(file, 0771);
+                }
+                return true;
             }
-            return true;
         }
-        catch (IOException e) {
+        catch (IOException | SecurityException e) {
             return false;
         }
     }
