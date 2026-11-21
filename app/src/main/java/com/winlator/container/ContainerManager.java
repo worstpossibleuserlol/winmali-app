@@ -51,6 +51,9 @@ public class ContainerManager {
         this.context = context;
         File rootDir = RootFS.find(context).getRootDir();
         homeDir = new File(rootDir, "home");
+        // Container creation uses home/xuser-N. Ensure its parent exists even on
+        // freshly installed or partially migrated root filesystems.
+        if (!homeDir.isDirectory()) homeDir.mkdirs();
         loadContainers();
     }
 
@@ -273,8 +276,14 @@ public class ContainerManager {
             int id = nextAvailableContainerId();
             containerData.put("id", id);
 
+            // Do not assume the rootfs installer already created /home.
+            // A missing parent makes mkdirs() on xuser-N fail and previously
+            // caused the create screen to close without explaining the failure.
+            if (!homeDir.isDirectory() && !homeDir.mkdirs()) return null;
+            if (!homeDir.isDirectory() || !homeDir.canWrite()) return null;
+
             File containerDir = new File(homeDir, RootFS.USER+"-"+id);
-            if (!containerDir.mkdirs()) return null;
+            if (containerDir.exists() || !containerDir.mkdirs()) return null;
 
             Container container = new Container(id);
             container.setRootDir(containerDir);
