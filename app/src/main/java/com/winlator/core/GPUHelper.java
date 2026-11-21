@@ -3,12 +3,17 @@ package com.winlator.core;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.opengl.EGL14;
+import android.os.Looper;
 
 import androidx.collection.ArrayMap;
 import androidx.preference.PreferenceManager;
 
 import java.util.Locale;
 import java.util.Objects;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -34,15 +39,68 @@ public abstract class GPUHelper {
         System.loadLibrary("winlator");
     }
 
-    private static ArrayMap<String, String> loadGPUInformation(Context context) {
-        final Thread thread = Thread.currentThread();
-        final ArrayMap<String, String> gpuInfo = new ArrayMap<>();
-        gpuInfo.put("renderer", "");
-        gpuInfo.put("vendor", "");
-        gpuInfo.put("version", "");
+    private static final long GPU_INFO_WAIT_MS = 500;
+    private static volatile FutureTask<ArrayMap<String, String>> gpuInfoTask;
 
-        (new Thread(() -> {
-            int[] attribList = new int[] {
+    private static ArrayMap<String, String> emptyGPUInformation() {
+        ArrayMap<String, String> info = new ArrayMap<>();
+        info.put("renderer", "");
+        info.put("vendor", "");
+        info.put("version", "");
+        return info;
+    }
+
+    private static ArrayMap<String, String> loadGPUInformation(Context context) {
+        FutureTask<ArrayMap<String, String>> task;
+        synchronized (GPUHelper.class) {
+            if (gpuInfoTask == null) {
+                Context appContext = context.getApplicationContext();
+                if (appContext == null) appContext = context;
+                final Context queryContext = appContext;
+                gpuInfoTask = new FutureTask<>(() -> queryGPUInformation(queryContext));
+                Thread worker = new Thread(gpuInfoTask, "WinMali-gpu-detection");
+                worker.setDaemon(true);
+                worker.start();
+            }
+            task = gpuInfoTask;
+        }
+
+        // EGL probing must never block Android's UI thread.
+        if (Looper.myLooper() == Looper.getMainLooper() && !task.isDone()) return emptyGPUInformation();
+        try {
+            return task.get(GPU_INFO_WAIT_MS, TimeUnit.MILLISECONDS);
+        }
+        catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return emptyGPUInformation();
+        }
+        catch (TimeoutException e) {
+            return emptyGPUInformation();
+        }
+        catch (ExecutionException e) {
+            synchronized (GPUHelper.class) {
+                if (gpuInfoTask == task) gpuInfoTask = null;
+            }
+            return emptyGPUInformation();
+        }
+    }
+
+    private static ArrayMap<String, String> queryGPUInformation(Context context) {
+        ArrayMap<String, String> info = emptyGPUInformation();
+        EGL10 egl = null;
+        EGLDisplay display = EGL10.EGL_NO_DISPLAY;
+        EGLContext eglContext = EGL10.EGL_NO_CONTEXT;
+        boolean initialized = false;
+        try {
+            egl = (EGL10)EGLContext.getEGL();
+            display = egl.eglGetDisplay(EGL10.EGL_DEFAULT_DISPLAY);
+            if (display == EGL10.EGL_NO_DISPLAY) return info;
+
+            int[] version = new int[2];
+            if (!egl.eglInitialize(display, version)) return info;
+            initialized = true;
+
+            int[] attrs = {
                 EGL10.EGL_SURFACE_TYPE, EGL10.EGL_PBUFFER_BIT,
                 EGL10.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
                 EGL10.EGL_RED_SIZE, 8,
@@ -52,48 +110,40 @@ public abstract class GPUHelper {
                 EGL10.EGL_NONE
             };
             EGLConfig[] configs = new EGLConfig[1];
-            int[] configCounts = new int[1];
+            int[] configCount = new int[1];
+            if (!egl.eglChooseConfig(display, attrs, configs, 1, configCount) ||
+                configCount[0] < 1 || configs[0] == null) return info;
 
-            EGL10 egl = (EGL10)EGLContext.getEGL();
-            EGLDisplay eglDisplay = egl.eglGetDisplay(EGL10.EGL_DEFAULT_DISPLAY);
-
-            int[] version = new int[2];
-            egl.eglInitialize(eglDisplay, version);
-            egl.eglChooseConfig(eglDisplay, attribList, configs, 1, configCounts);
-
-            attribList = new int[]{EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL10.EGL_NONE};
-            EGLContext eglContext = egl.eglCreateContext(eglDisplay, configs[0], EGL10.EGL_NO_CONTEXT, attribList);
-
-            egl.eglMakeCurrent(eglDisplay, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE, eglContext);
+            attrs = new int[]{EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL10.EGL_NONE};
+            eglContext = egl.eglCreateContext(display, configs[0], EGL10.EGL_NO_CONTEXT, attrs);
+            if (eglContext == EGL10.EGL_NO_CONTEXT) return info;
+            if (!egl.eglMakeCurrent(display, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE, eglContext)) return info;
 
             GL10 gl = (GL10)eglContext.getGL();
-            String gpuRenderer = Objects.toString(gl.glGetString(GL10.GL_RENDERER), "");
-            String gpuVendor = Objects.toString(gl.glGetString(GL10.GL_VENDOR), "");
-            String gpuVersion = Objects.toString(gl.glGetString(GL10.GL_VERSION), "");
+            String renderer = Objects.toString(gl.glGetString(GL10.GL_RENDERER), "");
+            String vendor = Objects.toString(gl.glGetString(GL10.GL_VENDOR), "");
+            String glVersion = Objects.toString(gl.glGetString(GL10.GL_VERSION), "");
+            info.put("renderer", renderer);
+            info.put("vendor", vendor);
+            info.put("version", glVersion);
 
-            gpuInfo.put("renderer", gpuRenderer);
-            gpuInfo.put("vendor", gpuVendor);
-            gpuInfo.put("version", gpuVersion);
-
-            final SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
-            preferences.edit()
-                .putString("gpu_renderer", gpuRenderer)
-                .putString("gpu_vendor", gpuVendor)
-                .putString("gpu_version", gpuVersion)
+            PreferenceManager.getDefaultSharedPreferences(context).edit()
+                .putString("gpu_renderer", renderer)
+                .putString("gpu_vendor", vendor)
+                .putString("gpu_version", glVersion)
                 .apply();
-
-            synchronized (thread) {
-                thread.notify();
-            }
-        })).start();
-
-        synchronized (thread) {
-            try {
-                thread.wait();
-            }
-            catch (InterruptedException e) {}
         }
-        return gpuInfo;
+        catch (RuntimeException ignored) {
+            // EGL may not expose a pbuffer-capable config on every device.
+        }
+        finally {
+            if (egl != null && display != EGL10.EGL_NO_DISPLAY) {
+                egl.eglMakeCurrent(display, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_CONTEXT);
+                if (eglContext != EGL10.EGL_NO_CONTEXT) egl.eglDestroyContext(display, eglContext);
+                if (initialized) egl.eglTerminate(display);
+            }
+        }
+        return info;
     }
 
     public static String glGetRenderer(Context context) {
