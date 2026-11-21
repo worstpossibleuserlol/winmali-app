@@ -1,12 +1,8 @@
-<p align="center">
-	<img src="logo.png" width="376" height="128" alt="Winlator Logo" />
-</p>
+# WinMali
 
-# Winlator
-
-Winlator is an Android application that lets you to run Windows (x86_64) applications with Wine and Box86/Box64.<br>
-This repository stores the latest updates for the Winlator app source.<br>
-For more information and releases, please visit the main repository: https://github.com/brunodev85/winlator
+WinMali is an Android application that lets you run Windows (x86_64) applications with Wine and Box86/Box64, with a development focus on graphics compatibility for Mali GPUs.
+This repository stores the latest updates for the WinMali app source.
+For more information and releases, please visit the main repository: https://github.com/worstpossibleuserlol/WinMali
 
 # Credits and Third-party apps
 
@@ -18,5 +14,5 @@ For more information and releases, please visit the main repository: https://git
 - VKD3D ([gitlab.winehq.org/wine/vkd3d](https://gitlab.winehq.org/wine/vkd3d))
 - CNC DDraw ([github.com/FunkyFr3sh/cnc-ddraw](https://github.com/FunkyFr3sh/cnc-ddraw))
 
-Special thanks to all the developers involved in these projects.<br>
+Special thanks to all the developers involved in these projects.
 Thank you to all the people who believe in this project.
