@@ -8,6 +8,9 @@ import com.winlator.core.FileUtils;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.Locale;
 
 public class RootFS {
@@ -42,7 +45,7 @@ public class RootFS {
     }
 
     public boolean isValid() {
-        return rootDir.isDirectory() && getRFSVersionFile().exists();
+        return rootDir.isDirectory() && getRFSVersionFile().isFile() && getVersion() > 0;
     }
 
     public int getVersion() {
@@ -61,15 +64,30 @@ public class RootFS {
         return String.format(Locale.ENGLISH, "%.1f", (float)getVersion());
     }
 
-    public void createRFSVersionFile(int version) {
-        getImageInfoDir().mkdirs();
+    public boolean createRFSVersionFile(int version) {
+        if (version <= 0) return false;
+        File infoDir = getImageInfoDir();
+        if (!infoDir.isDirectory() && !infoDir.mkdirs()) return false;
         File file = getRFSVersionFile();
+        File temporary = new File(infoDir, ".rfs_version.tmp");
         try {
-            file.createNewFile();
-            FileUtils.writeString(file, String.valueOf(version));
+            if (!FileUtils.writeString(temporary, String.valueOf(version)) ||
+                !temporary.isFile() || temporary.length() == 0) return false;
+            try {
+                Files.move(temporary.toPath(), file.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            }
+            catch (AtomicMoveNotSupportedException error) {
+                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
+            return file.isFile() && getVersion() == version;
         }
-        catch (IOException e) {
-            e.printStackTrace();
+        catch (IOException | RuntimeException error) {
+            android.util.Log.e("WinMali-RootFS", "Unable to write rootfs version marker", error);
+            return false;
+        }
+        finally {
+            if (temporary.exists()) temporary.delete();
         }
     }
 
