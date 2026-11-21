@@ -70,11 +70,22 @@ public abstract class WineInstaller {
             }
 
             File containerPatternFile = new File(installedWineDir, "/preinstall/container-pattern-"+wineInfo.fullVersion()+".tzst");
-            TarCompressorUtils.compress(TarCompressorUtils.Type.ZSTD, new File(rootDir, RootFS.WINEPREFIX), containerPatternFile, MainActivity.CONTAINER_PATTERN_COMPRESSION_LEVEL);
+            File installedPatternFile = new File(installedWineDir, containerPatternFile.getName());
+            File installedWinePath = new File(installedWineDir, wineInfo.identifier());
+            boolean archiveCreated = TarCompressorUtils.compress(TarCompressorUtils.Type.ZSTD,
+                new File(rootDir, RootFS.WINEPREFIX), containerPatternFile, MainActivity.CONTAINER_PATTERN_COMPRESSION_LEVEL);
+            boolean installationSucceeded = archiveCreated && !installedPatternFile.exists() &&
+                !installedWinePath.exists() && containerPatternFile.renameTo(installedPatternFile) &&
+                new File(wineInfo.path).renameTo(installedWinePath);
 
-            if (!containerPatternFile.renameTo(new File(installedWineDir, containerPatternFile.getName())) ||
-                    !(new File(wineInfo.path)).renameTo(new File(installedWineDir, wineInfo.identifier()))) {
-                containerPatternFile.delete();
+            if (!installationSucceeded) {
+                FileUtils.delete(installedPatternFile);
+                FileUtils.delete(containerPatternFile);
+                FileUtils.delete(new File(installedWineDir, "/preinstall"));
+                AppUtils.showToast(activity, R.string.unable_to_install_wine);
+                preloaderDialog.closeOnUiThread();
+                AppUtils.restartApplication(activity);
+                return;
             }
 
             FileUtils.delete(new File(installedWineDir, "/preinstall"));
