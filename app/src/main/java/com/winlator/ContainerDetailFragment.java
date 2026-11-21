@@ -22,6 +22,7 @@ import android.widget.PopupMenu;
 import android.widget.RadioGroup;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -254,12 +255,16 @@ public class ContainerDetailFragment extends Fragment {
 
                     preloaderDialog.show(R.string.creating_container);
                     manager.createContainerAsync(data, (container) -> {
-                        if (container != null) {
-                            this.container = container;
-                            saveWineRegistryKeys(view);
-                        }
                         preloaderDialog.close();
-                        getActivity().onBackPressed();
+                        if (!isAdded()) return;
+                        if (container == null) {
+                            Toast.makeText(context, R.string.container_create_failed, Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        this.container = container;
+                        saveWineRegistryKeys(view);
+                        FragmentActivity activity = getActivity();
+                        if (activity != null) activity.onBackPressed();
                     });
                 }
             }
