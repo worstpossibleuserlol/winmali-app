@@ -15,13 +15,11 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
-import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
 public abstract class ProcessHelper {
@@ -68,56 +66,82 @@ public abstract class ProcessHelper {
     }
 
     public static int exec(String command, EnvVars envVars, File workingDir, Callback<Integer> terminationCallback) {
-        int pid = -1;
         try {
-            ProcessBuilder processBuilder = (new ProcessBuilder(splitCommand(command))).directory(workingDir);
-            if (debugCallbacks.isEmpty()) processBuilder.redirectOutput(new File("/dev/null")).redirectErrorStream(true);
+            String[] arguments = splitCommand(command);
+            if (arguments.length == 0) return -1;
+
+            boolean captureOutput = hasDebugCallbacks();
+            ProcessBuilder processBuilder = new ProcessBuilder(arguments).directory(workingDir);
+            if (!captureOutput) processBuilder.redirectOutput(new File("/dev/null")).redirectErrorStream(true);
 
             Map<String, String> environment = processBuilder.environment();
-            for (String name : envVars) environment.put(name, envVars.get(name));
+            if (envVars != null) {
+                for (String name : envVars) environment.put(name, envVars.get(name));
+            }
 
             java.lang.Process process = processBuilder.start();
-            Field pidField = process.getClass().getDeclaredField("pid");
-            pidField.setAccessible(true);
-            pid = pidField.getInt(process);
-            pidField.setAccessible(false);
+            long processId = process.pid();
+            if (processId <= 0 || processId > Integer.MAX_VALUE) {
+                process.destroyForcibly();
+                return -1;
+            }
 
-            if (!debugCallbacks.isEmpty()) {
+            if (captureOutput) {
                 createDebugThread(process.getInputStream());
                 createDebugThread(process.getErrorStream());
             }
-
             if (terminationCallback != null) createWaitForThread(process, terminationCallback);
+            return (int)processId;
         }
-        catch (Exception e) {}
-        return pid;
+        catch (Exception e) {
+            return -1;
+        }
+    }
+
+    private static boolean hasDebugCallbacks() {
+        synchronized (debugCallbacks) {
+            return !debugCallbacks.isEmpty();
+        }
     }
 
     private static void createDebugThread(final InputStream inputStream) {
-        Executors.newSingleThreadExecutor().execute(() -> {
+        Thread worker = new Thread(() -> {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
+                    ArrayList<Callback<String>> callbacks;
                     synchronized (debugCallbacks) {
-                        if (!debugCallbacks.isEmpty()) {
-                            for (Callback<String> callback : debugCallbacks) callback.call(line);
-                        }
-                        else if (MainActivity.DEBUG_MODE) System.out.println(line);
+                        callbacks = new ArrayList<>(debugCallbacks);
                     }
+                    if (!callbacks.isEmpty()) {
+                        for (Callback<String> callback : callbacks) {
+                            try {
+                                callback.call(line);
+                            }
+                            catch (RuntimeException ignored) {}
+                        }
+                    }
+                    else if (MainActivity.DEBUG_MODE) System.out.println(line);
                 }
             }
-            catch (IOException e) {}
-        });
+            catch (IOException ignored) {}
+        }, "WinMali-process-output");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     private static void createWaitForThread(java.lang.Process process, final Callback<Integer> terminationCallback) {
-        Executors.newSingleThreadExecutor().execute(() -> {
+        Thread worker = new Thread(() -> {
             try {
-                int status = process.waitFor();
-                terminationCallback.call(status);
+                terminationCallback.call(process.waitFor());
             }
-            catch (InterruptedException e) {}
-        });
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            catch (RuntimeException ignored) {}
+        }, "WinMali-process-wait");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     public static void removeAllDebugCallbacks() {
@@ -139,50 +163,53 @@ public abstract class ProcessHelper {
     }
 
     public static String[] splitCommand(String command) {
-        ArrayList<String> result = new ArrayList<>();
-        boolean startedQuotes = false;
-        String value = "";
-        char currChar, nextChar;
-        for (int i = 0, count = command.length(); i < count; i++) {
-            currChar = command.charAt(i);
+        if (command == null || command.isEmpty()) return new String[0];
 
-            if (startedQuotes) {
-                if (currChar == '"') {
-                    startedQuotes = false;
-                    if (!value.isEmpty()) {
-                        value += '"';
-                        result.add(value);
-                        value = "";
-                    }
+        ArrayList<String> result = new ArrayList<>();
+        StringBuilder value = new StringBuilder();
+        char quote = 0;
+        boolean tokenStarted = false;
+
+        for (int i = 0; i < command.length(); i++) {
+            char current = command.charAt(i);
+
+            if (current == '\\' && i + 1 < command.length()) {
+                char next = command.charAt(i + 1);
+                if (next == ' ' || next == '"' || (next == '\'' && quote != '"')) {
+                    value.append(next);
+                    tokenStarted = true;
+                    i++;
+                    continue;
                 }
-                else value += currChar;
             }
-            else if (currChar == '"') {
-                startedQuotes = true;
-                value += '"';
+
+            if (current == '"' || current == '\'') {
+                if (quote == 0) {
+                    quote = current;
+                    tokenStarted = true;
+                    continue;
+                }
+                if (quote == current) {
+                    quote = 0;
+                    continue;
+                }
+            }
+
+            if (Character.isWhitespace(current) && quote == 0) {
+                if (tokenStarted) {
+                    result.add(value.toString());
+                    value.setLength(0);
+                    tokenStarted = false;
+                }
             }
             else {
-                nextChar = i < count-1 ? command.charAt(i+1) : '\0';
-                if (currChar == ' ' || (currChar == '\\' && nextChar == ' ')) {
-                    if (currChar == '\\') {
-                        value += ' ';
-                        i++;
-                    }
-                    else if (!value.isEmpty()) {
-                        result.add(value);
-                        value = "";
-                    }
-                }
-                else {
-                    value += currChar;
-                    if (i == count-1) {
-                        result.add(value);
-                        value = "";
-                    }
-                }
+                value.append(current);
+                tokenStarted = true;
             }
         }
 
+        if (quote != 0) throw new IllegalArgumentException("Unterminated quoted command argument");
+        if (tokenStarted) result.add(value.toString());
         return result.toArray(new String[0]);
     }
 
@@ -340,8 +367,8 @@ public abstract class ProcessHelper {
                     result.add(pstat);
                 }
             }
-            catch (Exception e) {
-                return Collections.emptyList();
+            catch (Exception ignored) {
+                // A process may exit after /proc was enumerated. Keep the other results.
             }
         }
 
