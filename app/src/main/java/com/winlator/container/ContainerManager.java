@@ -2,6 +2,8 @@ package com.winlator.container;
 
 import android.content.Context;
 import android.os.Handler;
+import android.system.ErrnoException;
+import android.system.Os;
 
 import com.winlator.R;
 import com.winlator.core.Callback;
@@ -17,9 +19,16 @@ import org.json.JSONObject;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class ContainerManager {
+    private static final ExecutorService OPERATIONS = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "WinMali-container-operations");
+        thread.setDaemon(true);
+        return thread;
+    });
+
     private final ArrayList<Container> containers = new ArrayList<>();
     private int maxContainerId = 0;
     private final File homeDir;
@@ -36,79 +45,117 @@ public class ContainerManager {
         return context;
     }
 
-    public ArrayList<Container> getContainers() {
-        return containers;
+    public synchronized ArrayList<Container> getContainers() {
+        return new ArrayList<>(containers);
     }
 
-    private void loadContainers() {
+    private synchronized void loadContainers() {
         containers.clear();
         maxContainerId = 0;
 
-        try {
-            File[] files = homeDir.listFiles();
-            if (files != null) {
-                for (File file : files) {
-                    if (file.isDirectory()) {
-                        if (file.getName().startsWith(RootFS.USER+"-")) {
-                            Container container = new Container(Integer.parseInt(file.getName().replace(RootFS.USER+"-", "")));
-                            container.setRootDir(new File(homeDir, RootFS.USER+"-"+container.id));
-                            JSONObject data = new JSONObject(FileUtils.readString(container.getConfigFile()));
-                            container.loadData(data);
-                            containers.add(container);
-                            maxContainerId = Math.max(maxContainerId, container.id);
-                        }
-                    }
-                }
+        File[] files = homeDir.listFiles();
+        if (files == null) return;
+
+        String prefix = RootFS.USER+"-";
+        for (File file : files) {
+            if (!file.isDirectory() || !file.getName().startsWith(prefix)) continue;
+            try {
+                int id = Integer.parseInt(file.getName().substring(prefix.length()));
+                if (id <= 0) continue;
+
+                Container container = new Container(id);
+                container.setRootDir(file);
+                File configFile = container.getConfigFile();
+                if (!configFile.isFile()) continue;
+
+                JSONObject data = new JSONObject(FileUtils.readString(configFile));
+                container.loadData(data);
+                containers.add(container);
+                maxContainerId = Math.max(maxContainerId, id);
+            }
+            catch (Exception ignored) {
+                // Ignore a damaged container directory without hiding valid containers.
             }
         }
-        catch (JSONException e) {}
     }
 
-    public void activateContainer(Container container) {
-        container.setRootDir(new File(homeDir, RootFS.USER+"-"+container.id));
-        File file = new File(homeDir, RootFS.USER);
-        file.delete();
-        FileUtils.symlink(RootFS.USER+"-"+container.id, file.getPath());
+    private int nextAvailableContainerId() {
+        int id = maxContainerId + 1;
+        while (new File(homeDir, RootFS.USER+"-"+id).exists()) id++;
+        return id;
+    }
+
+    public synchronized boolean activateContainer(Container container) {
+        if (container == null || getContainerById(container.id) == null) return false;
+
+        File activeLink = new File(homeDir, RootFS.USER);
+        File temporaryLink = new File(homeDir, RootFS.USER+".new");
+        FileUtils.delete(temporaryLink);
+        if (!FileUtils.symlink(RootFS.USER+"-"+container.id, temporaryLink.getPath())) return false;
+
+        try {
+            // Rename replaces the previous symlink atomically; no delete-before-create gap.
+            Os.rename(temporaryLink.getPath(), activeLink.getPath());
+            container.setRootDir(new File(homeDir, RootFS.USER+"-"+container.id));
+            return true;
+        }
+        catch (ErrnoException e) {
+            FileUtils.delete(temporaryLink);
+            return false;
+        }
     }
 
     public void createContainerAsync(final JSONObject data, Callback<Container> callback) {
-        final Handler handler = new Handler();
-        Executors.newSingleThreadExecutor().execute(() -> {
-            final Container container = createContainer(data);
-            handler.post(() -> callback.call(container));
+        final Handler handler = new Handler(context.getMainLooper());
+        OPERATIONS.execute(() -> {
+            Container created = null;
+            try {
+                created = createContainer(data);
+            }
+            catch (RuntimeException ignored) {}
+            final Container result = created;
+            if (callback != null) handler.post(() -> callback.call(result));
         });
     }
 
     public void duplicateContainerAsync(Container container, Runnable callback) {
-        final Handler handler = new Handler();
-        Executors.newSingleThreadExecutor().execute(() -> {
-            duplicateContainer(container);
-            handler.post(callback);
+        final Handler handler = new Handler(context.getMainLooper());
+        OPERATIONS.execute(() -> {
+            try {
+                duplicateContainer(container);
+            }
+            catch (RuntimeException ignored) {}
+            if (callback != null) handler.post(callback);
         });
     }
 
     public void removeContainerAsync(Container container, Runnable callback) {
-        final Handler handler = new Handler();
-        Executors.newSingleThreadExecutor().execute(() -> {
-            removeContainer(container);
-            handler.post(callback);
+        final Handler handler = new Handler(context.getMainLooper());
+        OPERATIONS.execute(() -> {
+            try {
+                removeContainer(container);
+            }
+            catch (RuntimeException ignored) {}
+            if (callback != null) handler.post(callback);
         });
     }
 
-    private Container createContainer(JSONObject data) {
+    private synchronized Container createContainer(JSONObject data) {
         try {
-            int id = maxContainerId + 1;
-            data.put("id", id);
+            if (data == null) return null;
+            JSONObject containerData = new JSONObject(data.toString());
+            int id = nextAvailableContainerId();
+            containerData.put("id", id);
 
             File containerDir = new File(homeDir, RootFS.USER+"-"+id);
             if (!containerDir.mkdirs()) return null;
 
             Container container = new Container(id);
             container.setRootDir(containerDir);
-            container.loadData(data);
+            container.loadData(containerData);
 
-            boolean isMainWineVersion = !data.has("wineVersion") || WineInfo.isMainWineVersion(data.getString("wineVersion"));
-            if (!isMainWineVersion) container.setWineVersion(data.getString("wineVersion"));
+            boolean isMainWineVersion = !containerData.has("wineVersion") || WineInfo.isMainWineVersion(containerData.getString("wineVersion"));
+            if (!isMainWineVersion) container.setWineVersion(containerData.getString("wineVersion"));
 
             if (!extractContainerPatternFile(container.getWineVersion(), containerDir)) {
                 FileUtils.delete(containerDir);
@@ -116,7 +163,7 @@ public class ContainerManager {
             }
 
             container.saveData();
-            maxContainerId++;
+            maxContainerId = Math.max(maxContainerId, id);
             containers.add(container);
             return container;
         }
@@ -124,8 +171,9 @@ public class ContainerManager {
         return null;
     }
 
-    private void duplicateContainer(Container srcContainer) {
-        int id = maxContainerId + 1;
+    private synchronized void duplicateContainer(Container srcContainer) {
+        if (srcContainer == null || srcContainer.getRootDir() == null || !srcContainer.getRootDir().isDirectory()) return;
+        int id = nextAvailableContainerId();
 
         File dstDir = new File(homeDir, RootFS.USER+"-"+id);
         if (!dstDir.mkdirs()) return;
@@ -156,11 +204,11 @@ public class ContainerManager {
         dstContainer.setDesktopTheme(srcContainer.getDesktopTheme());
         dstContainer.saveData();
 
-        maxContainerId++;
+        maxContainerId = Math.max(maxContainerId, id);
         containers.add(dstContainer);
     }
 
-    private void removeContainer(Container container) {
+    private synchronized void removeContainer(Container container) {
         if (FileUtils.delete(container.getRootDir())) containers.remove(container);
     }
 
@@ -224,11 +272,11 @@ public class ContainerManager {
         return fileInfos;
     }
 
-    public int getNextContainerId() {
-        return maxContainerId + 1;
+    public synchronized int getNextContainerId() {
+        return nextAvailableContainerId();
     }
 
-    public Container getContainerById(int id) {
+    public synchronized Container getContainerById(int id) {
         for (Container container : containers) if (container.id == id) return container;
         return null;
     }
