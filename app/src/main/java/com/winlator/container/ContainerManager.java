@@ -353,7 +353,8 @@ public class ContainerManager {
                 File installedWineDir = RootFS.find(context).getInstalledWineDir();
                 File runtime = new File(installedWineDir, container.getWineVersion());
                 File pattern = new File(installedWineDir, "container-pattern-"+info.fullVersion()+".tzst");
-                if (!runtime.isDirectory() || !pattern.isFile()) return null;
+                if (info.path == null || !info.identifier().equals(container.getWineVersion()) ||
+                    !runtime.isDirectory() || !pattern.isFile()) return null;
             }
 
             File destination = new File(homeDir, RootFS.USER+"-"+container.id);
