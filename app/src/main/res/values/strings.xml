@@ -12,6 +12,7 @@
     <string name="new_container">New Container</string>
     <string name="edit_container">Edit Container</string>
     <string name="creating_container">Creating Container...</string>
+    <string name="container_create_failed">Could not create the container. Check that system files are installed and that the app has enough storage, then try again.</string>
     <string name="removing_container">Removing Container...</string>
     <string name="import_container">Import Container</string>
     <string name="export_container">Export Container</string>
