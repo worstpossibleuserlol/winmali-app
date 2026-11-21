@@ -15,6 +15,14 @@
     <string name="removing_container">Removing Container...</string>
     <string name="cannot_remove_active_container">Cannot remove the active container. Stop its session first.</string>
     <string name="duplicating_container">Duplicating Container...</string>
+    <string name="import_container">Import Container</string>
+    <string name="export_container">Export Container</string>
+    <string name="importing_container">Importing container...</string>
+    <string name="exporting_container">Exporting container...</string>
+    <string name="container_imported">Container imported.</string>
+    <string name="container_import_failed">Unable to import this container archive.</string>
+    <string name="container_exported">Container exported.</string>
+    <string name="container_export_failed">Unable to export this container. Stop its active session and try again.</string>
     <string name="installing_system_files">Installing System Files...</string>
     <string name="updating_system_files">Updating System Files...</string>
     <string name="starting_up">Starting up...</string>
