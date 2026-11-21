@@ -133,10 +133,15 @@ public class FrameRating extends FrameLayout implements Runnable {
                 cpuInfo = "Box64 v"+ Box64Utils.extractBinVersion(cpuPanel.getContext());
             }
 
+            int cpuUsage = CPUStatus.getUsagePercent();
             short[] clockSpeeds = CPUStatus.getCurrentClockSpeeds();
             int maxClockSpeed = 0;
             for (short clockSpeed : clockSpeeds) maxClockSpeed = Math.max(maxClockSpeed, clockSpeed);
-            ((TextView)cpuPanel.getChildAt(1)).setText(CPUStatus.formatClockSpeed(maxClockSpeed)+" | "+cpuInfo);
+            String usageText = cpuUsage >= 0 ? cpuUsage+"%" : "N/A";
+            String clockText = maxClockSpeed > 0 ? CPUStatus.formatClockSpeed(maxClockSpeed) : "N/A";
+            int temperature = CPUStatus.getTemperature();
+            String temperatureText = temperature > 0 ? " | "+temperature+"°C" : "";
+            ((TextView)cpuPanel.getChildAt(1)).setText(usageText+" | "+clockText+temperatureText+" | "+cpuInfo);
         }
     }
 }
