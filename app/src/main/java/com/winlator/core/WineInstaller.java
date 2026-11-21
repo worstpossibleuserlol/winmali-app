@@ -201,7 +201,11 @@ public abstract class WineInstaller {
         if (files != null) {
             for (File file : files) {
                 String name = file.getName();
-                if (name.startsWith("wine")) wineInfos.add(WineInfo.fromIdentifier(context, name));
+                if (!name.startsWith("wine-") || !file.isDirectory() || FileUtils.isSymlink(file)) continue;
+                if (findWineExecutable(file) == null) continue;
+
+                WineInfo wineInfo = WineInfo.fromIdentifier(context, name);
+                if (wineInfo != WineInfo.MAIN_WINE_INFO) wineInfos.add(wineInfo);
             }
         }
 
