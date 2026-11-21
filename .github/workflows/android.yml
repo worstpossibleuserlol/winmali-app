@@ -40,6 +40,12 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # Avoid the action's obsolete default "tools" package.
+          packages: platform-tools
+
       - name: Install Android SDK, NDK and CMake
         run: |
           SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -maxdepth 2 -type f -name sdkmanager | sort | tail -n 1)"
