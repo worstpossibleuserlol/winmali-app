@@ -15,6 +15,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -80,8 +81,8 @@ public abstract class ProcessHelper {
             }
 
             java.lang.Process process = processBuilder.start();
-            long processId = process.pid();
-            if (processId <= 0 || processId > Integer.MAX_VALUE) {
+            int processId = getProcessId(process);
+            if (processId <= 0) {
                 process.destroyForcibly();
                 return -1;
             }
@@ -96,6 +97,25 @@ public abstract class ProcessHelper {
         catch (Exception e) {
             return -1;
         }
+    }
+
+    private static int getProcessId(java.lang.Process process) {
+        Class<?> processClass = process.getClass();
+        while (processClass != null) {
+            try {
+                Field pidField = processClass.getDeclaredField("pid");
+                pidField.setAccessible(true);
+                int pid = pidField.getInt(process);
+                return pid > 0 ? pid : -1;
+            }
+            catch (NoSuchFieldException e) {
+                processClass = processClass.getSuperclass();
+            }
+            catch (ReflectiveOperationException | RuntimeException e) {
+                return -1;
+            }
+        }
+        return -1;
     }
 
     private static boolean hasDebugCallbacks() {
