@@ -233,8 +233,18 @@ public class ContainerManager {
             if (candidate == null && new File(staging, ".container").isFile()) candidate = staging;
             if (candidate == null) return null;
 
-            JSONObject data = new JSONObject(FileUtils.readString(new File(candidate, ".container")));
+            File configFile = new File(candidate, ".container");
+            if (!configFile.isFile() || FileUtils.isSymlink(configFile)) return null;
+            JSONObject data = new JSONObject(FileUtils.readString(configFile));
             if (!data.has("name") || data.optString("name").trim().isEmpty()) return null;
+
+            String wineVersion = data.optString("wineVersion", WineInfo.MAIN_WINE_INFO.identifier());
+            if (!WineInfo.isMainWineVersion(wineVersion)) {
+                WineInfo runtime = WineInfo.fromIdentifier(context, wineVersion);
+                if (runtime == WineInfo.MAIN_WINE_INFO || runtime.path == null || !new File(runtime.path).isDirectory()) {
+                    return null;
+                }
+            }
 
             int id = nextAvailableContainerId();
             destination = new File(homeDir, RootFS.USER + "-" + id);
