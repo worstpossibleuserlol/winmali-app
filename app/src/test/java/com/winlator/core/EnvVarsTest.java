@@ -9,8 +9,8 @@ import static org.junit.Assert.assertTrue;
 public class EnvVarsTest {
     @Test
     public void parsesEscapedSpacesAndPreservesWindowsBackslashes() {
-        EnvVars vars = new EnvVars("APP_PATH=C:\\\\Program\\ Files\\\\Game FLAG=1");
-        assertEquals("C:\\\\Program Files\\\\Game", vars.get("APP_PATH"));
+        EnvVars vars = new EnvVars("APP_PATH=C:\\Program\\ Files\\Game FLAG=1");
+        assertEquals("C:\\Program Files\\Game", vars.get("APP_PATH"));
         assertEquals("1", vars.get("FLAG"));
     }
 
@@ -28,7 +28,7 @@ public class EnvVarsTest {
     @Test
     public void escapedSerializationRoundTripsValuesWithSpaces() {
         EnvVars original = new EnvVars();
-        original.put("PATH_VALUE", "C:\\\\Program Files\\\\Game");
+        original.put("PATH_VALUE", "C:\\Program Files\\Game");
         original.put("FLAG", "yes");
 
         EnvVars restored = new EnvVars(original.toEscapedString());
