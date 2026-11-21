@@ -94,6 +94,20 @@ public class TarCompressorUtilsTest {
     }
 
     @Test
+    public void createsAndExtractsGzipArchive() throws IOException {
+        File source = new File(temporaryFolder.getRoot(), "gzip-source");
+        assertTrue(source.mkdirs());
+        Files.write(new File(source, "payload.txt").toPath(),
+            "gzip-runtime".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        File archive = new File(temporaryFolder.getRoot(), "runtime.tar.gz");
+        assertTrue(TarCompressorUtils.compress(TarCompressorUtils.Type.GZIP, source, archive));
+        File extracted = new File(temporaryFolder.getRoot(), "gzip-extracted");
+        assertTrue(TarCompressorUtils.extract(TarCompressorUtils.Type.GZIP, archive, extracted));
+        assertEquals("gzip-runtime", FileUtils.readString(new File(extracted, "gzip-source/payload.txt")));
+    }
+
+    @Test
     public void reportsMissingSourceInsteadOfCreatingAnArchive() {
         File missing = new File(temporaryFolder.getRoot(), "missing-source");
         File archive = new File(temporaryFolder.getRoot(), "should-not-exist.tar.xz");
