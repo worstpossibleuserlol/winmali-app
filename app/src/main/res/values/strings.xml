@@ -13,6 +13,7 @@
     <string name="edit_container">Edit Container</string>
     <string name="creating_container">Creating Container...</string>
     <string name="removing_container">Removing Container...</string>
+    <string name="cannot_remove_active_container">Cannot remove the active container. Stop its session first.</string>
     <string name="duplicating_container">Duplicating Container...</string>
     <string name="installing_system_files">Installing System Files...</string>
     <string name="updating_system_files">Updating System Files...</string>
