@@ -25,24 +25,31 @@ public class TarCompressorUtilsTest {
         final byte type;
         final String linkName;
         final byte[] data;
+        final boolean preserveAbsolutePath;
 
-        private EntrySpec(String name, byte type, String linkName, byte[] data) {
+        private EntrySpec(String name, byte type, String linkName, byte[] data, boolean preserveAbsolutePath) {
             this.name = name;
             this.type = type;
             this.linkName = linkName;
             this.data = data;
+            this.preserveAbsolutePath = preserveAbsolutePath;
         }
 
         static EntrySpec file(String name, String data) {
-            return new EntrySpec(name, TarArchiveEntry.LF_NORMAL, null, data.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return new EntrySpec(name, TarArchiveEntry.LF_NORMAL, null, data.getBytes(java.nio.charset.StandardCharsets.UTF_8), false);
         }
 
         static EntrySpec directory(String name) {
-            return new EntrySpec(name, TarArchiveEntry.LF_DIR, null, new byte[0]);
+            return new EntrySpec(name, TarArchiveEntry.LF_DIR, null, new byte[0], false);
         }
 
         static EntrySpec symlink(String name, String linkName) {
-            return new EntrySpec(name, TarArchiveEntry.LF_SYMLINK, linkName, new byte[0]);
+            return new EntrySpec(name, TarArchiveEntry.LF_SYMLINK, linkName, new byte[0], false);
+        }
+
+        static EntrySpec absoluteFile(String name, String data) {
+            return new EntrySpec(name, TarArchiveEntry.LF_NORMAL, null,
+                data.getBytes(java.nio.charset.StandardCharsets.UTF_8), true);
         }
     }
 
@@ -51,14 +58,13 @@ public class TarCompressorUtilsTest {
         try (TarArchiveOutputStream tar = new TarArchiveOutputStream(
                 new XZCompressorOutputStream(new FileOutputStream(archive)))) {
             for (EntrySpec spec : entries) {
-                TarArchiveEntry entry = new TarArchiveEntry(spec.name, spec.type);
+                String entryName = spec.type == TarArchiveEntry.LF_DIR && !spec.name.endsWith("/")
+                    ? spec.name + "/" : spec.name;
+                TarArchiveEntry entry = new TarArchiveEntry(entryName, spec.type, spec.preserveAbsolutePath);
                 if (spec.type == TarArchiveEntry.LF_SYMLINK) {
                     entry.setLinkName(spec.linkName);
                 }
-                else if (spec.type == TarArchiveEntry.LF_DIR) {
-                    entry.setName(spec.name.endsWith("/") ? spec.name : spec.name + "/");
-                }
-                else {
+                else if (spec.type != TarArchiveEntry.LF_DIR) {
                     entry.setSize(spec.data.length);
                 }
                 tar.putArchiveEntry(entry);
@@ -93,7 +99,7 @@ public class TarCompressorUtilsTest {
     public void rejectsAbsoluteArchiveEntry() throws IOException {
         File destination = new File(temporaryFolder.getRoot(), "rootfs");
         File escaped = new File(temporaryFolder.getRoot(), "absolute-escape.txt");
-        File archive = createArchive(EntrySpec.file(escaped.getAbsolutePath(), "outside"));
+        File archive = createArchive(EntrySpec.absoluteFile(escaped.getAbsolutePath(), "outside"));
 
         assertFalse(TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, archive, destination));
         assertFalse(escaped.exists());
