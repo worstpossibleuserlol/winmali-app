@@ -151,129 +151,6 @@ public class ContainerManager {
         });
     }
 
-    public void exportContainerAsync(Container container, Uri destination, Callback<Boolean> callback) {
-        final Handler handler = new Handler(context.getMainLooper());
-        OPERATIONS.execute(() -> {
-            boolean exported = false;
-            try {
-                exported = exportContainer(container, destination);
-            }
-            catch (RuntimeException ignored) {}
-            final boolean result = exported;
-            if (callback != null) handler.post(() -> callback.call(result));
-        });
-    }
-
-    private boolean exportContainer(Container container, Uri destination) {
-        if (container == null || destination == null || container.getRootDir() == null ||
-            !container.getRootDir().isDirectory() || isActiveContainer(container)) return false;
-
-        File archive = null;
-        try {
-            archive = File.createTempFile("winmali-container-", ".tzst", context.getCacheDir());
-            if (!TarCompressorUtils.compress(TarCompressorUtils.Type.ZSTD, container.getRootDir(), archive)) return false;
-
-            try (InputStream input = new FileInputStream(archive);
-                 OutputStream output = context.getContentResolver().openOutputStream(destination, "w")) {
-                if (output == null) return false;
-                byte[] buffer = new byte[65536];
-                int count;
-                while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
-                output.flush();
-                return true;
-            }
-        }
-        catch (IOException | SecurityException e) {
-            return false;
-        }
-        finally {
-            if (archive != null && archive.exists()) archive.delete();
-        }
-    }
-
-    public void importContainerAsync(Uri source, Callback<Container> callback) {
-        final Handler handler = new Handler(context.getMainLooper());
-        OPERATIONS.execute(() -> {
-            Container imported = null;
-            try {
-                imported = importContainer(source);
-            }
-            catch (RuntimeException ignored) {}
-            final Container result = imported;
-            if (callback != null) handler.post(() -> callback.call(result));
-        });
-    }
-
-    private synchronized Container importContainer(Uri source) {
-        if (source == null) return null;
-        File staging = null;
-        File destination = null;
-        try {
-            TarCompressorUtils.Type type = TarCompressorUtils.detectType(context, source);
-            if (type == null) return null;
-
-            staging = File.createTempFile("winmali-import-", "", context.getCacheDir());
-            if (!staging.delete() || !staging.mkdirs()) return null;
-            if (!TarCompressorUtils.extract(type, context, source, staging)) return null;
-
-            File candidate = null;
-            File[] entries = staging.listFiles();
-            if (entries == null) return null;
-            for (File entry : entries) {
-                if (entry.isDirectory() && !FileUtils.isSymlink(entry) &&
-                    new File(entry, ".container").isFile()) {
-                    if (candidate != null) return null;
-                    candidate = entry;
-                }
-            }
-            if (candidate == null && new File(staging, ".container").isFile()) candidate = staging;
-            if (candidate == null) return null;
-
-            File configFile = new File(candidate, ".container");
-            if (!configFile.isFile() || FileUtils.isSymlink(configFile)) return null;
-            JSONObject data = new JSONObject(FileUtils.readString(configFile));
-            if (!data.has("name") || data.optString("name").trim().isEmpty()) return null;
-
-            String wineVersion = data.optString("wineVersion", WineInfo.MAIN_WINE_INFO.identifier());
-            if (!WineInfo.isMainWineVersion(wineVersion)) {
-                WineInfo runtime = WineInfo.fromIdentifier(context, wineVersion);
-                if (runtime == WineInfo.MAIN_WINE_INFO || runtime.path == null || !new File(runtime.path).isDirectory()) {
-                    return null;
-                }
-            }
-
-            int id = nextAvailableContainerId();
-            destination = new File(homeDir, RootFS.USER + "-" + id);
-            if (!destination.mkdirs()) return null;
-            if (!FileUtils.copy(candidate, destination, (file) -> FileUtils.chmod(file, 0771))) {
-                FileUtils.delete(destination);
-                return null;
-            }
-
-            data.put("id", id);
-            Container container = new Container(id);
-            container.setRootDir(destination);
-            container.loadData(data);
-            container.saveData();
-            if (!container.getConfigFile().isFile()) {
-                FileUtils.delete(destination);
-                return null;
-            }
-
-            maxContainerId = Math.max(maxContainerId, id);
-            containers.add(container);
-            destination = null;
-            return container;
-        }
-        catch (IOException | JSONException | SecurityException e) {
-            return null;
-        }
-        finally {
-            if (destination != null && destination.exists()) FileUtils.delete(destination);
-            if (staging != null && staging.exists()) FileUtils.delete(staging);
-        }
-    }
-
     public void exportContainerAsync(Container container, Uri destinationUri, Callback<Boolean> callback) {
         final Handler handler = new Handler(context.getMainLooper());
         OPERATIONS.execute(() -> {
@@ -281,7 +158,8 @@ public class ContainerManager {
             File archive = null;
             try {
                 if (container != null && container.getRootDir() != null &&
-                    container.getRootDir().isDirectory() && destinationUri != null) {
+                    container.getRootDir().isDirectory() && destinationUri != null &&
+                    !isActiveContainer(container)) {
                     archive = new File(context.getCacheDir(), "winmali-export-"+UUID.randomUUID()+".tar.zst");
                     success = TarCompressorUtils.compress(TarCompressorUtils.Type.ZSTD,
                         container.getRootDir(), archive, 3);
