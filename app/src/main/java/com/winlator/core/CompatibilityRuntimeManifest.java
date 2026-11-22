@@ -14,8 +14,10 @@ import java.util.Set;
 /**
  * WinMali compatibility-runtime package manifest.
  *
- * Android host executables must be AArch64 ELF. Windows guest architectures
- * are declared separately and checked against the package's Wine library tree.
+ * Packages target the arm64-v8a Android host. Wine itself may be AArch64 or
+ * x86-64; x86-64 Wine is launched through the bundled AArch64 Box64 runtime.
+ * Windows guest architectures are declared separately and checked against
+ * the package's Wine library tree.
  */
 public final class CompatibilityRuntimeManifest {
     public static final String FILE_NAME = "winmali-runtime.json";
@@ -131,7 +133,7 @@ public final class CompatibilityRuntimeManifest {
         File wine = resolveSafeFile(runtimeRoot, wineExecutable);
         File launch = resolveSafeFile(runtimeRoot, entrypoint);
         File libraries = resolveSafeFile(runtimeRoot, wineLibraryRoot);
-        if (!CompatibilityRuntimePackage.isAarch64Elf(wine) || launch == null ||
+        if (!CompatibilityRuntimePackage.isSupportedWineElf(wine) || launch == null ||
             !launch.isFile() || !libraries.isDirectory()) return false;
 
         for (String guest : guestArchitectures) {
