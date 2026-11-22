@@ -40,7 +40,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public abstract class GeneralComponents {
     public enum InstallMode {DOWNLOAD, FILE, BOTH}
-    private static final String INSTALLABLE_COMPONENTS_URL = "https://raw.githubusercontent.com/brunodev85/winlator/main/installable_components/%s";
+    private static final String INSTALLABLE_COMPONENTS_URL = "https://raw.githubusercontent.com/worstpossibleuserlol/WinMali/development/installable_components/%s";
     private static final long MAX_COMPONENT_IMPORT_BYTES = 512L * 1024L * 1024L;
     private static final ExecutorService IMPORT_OPERATIONS = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "WinMali-component-import");
