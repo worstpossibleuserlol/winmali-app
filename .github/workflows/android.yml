@@ -8,6 +8,7 @@ on:
       - development
       - runtime-compatibility
       - gpu-compatibility
+      - hotfix-system-files-extraction
     paths:
       - "**.gradle"
       - "**.java"
