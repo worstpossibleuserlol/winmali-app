@@ -9,24 +9,30 @@ public class StreamUtils {
     public static final int BUFFER_SIZE = 64 * 1024;
 
     public static int skip(InputStream inStream, int bytesToSkip) {
+        if (inStream == null || bytesToSkip <= 0) return 0;
+        int bytesSkipped = 0;
         try {
-            int bytesSkipped = (int)inStream.skip(bytesToSkip);
+            long initiallySkipped = inStream.skip(bytesToSkip);
+            bytesSkipped = (int)Math.max(0L, Math.min((long)bytesToSkip, initiallySkipped));
 
-            if (bytesSkipped > 0 && bytesSkipped != bytesToSkip) {
+            if (bytesSkipped < bytesToSkip) {
                 final byte[] skipBuffer = new byte[1024];
-
-                int bytesRead;
-                while (bytesSkipped != bytesToSkip) {
-                    bytesRead = inStream.read(skipBuffer, 0, Math.min(skipBuffer.length, bytesToSkip - bytesSkipped));
-                    if (bytesRead == -1) break;
+                while (bytesSkipped < bytesToSkip) {
+                    int bytesRead = inStream.read(skipBuffer, 0,
+                        Math.min(skipBuffer.length, bytesToSkip - bytesSkipped));
+                    if (bytesRead < 0) break;
+                    if (bytesRead == 0) {
+                        if (inStream.read() < 0) break;
+                        bytesRead = 1;
+                    }
                     bytesSkipped += bytesRead;
                 }
             }
-            return bytesSkipped;
         }
-        catch (IOException e) {
-            return 0;
+        catch (IOException error) {
+            android.util.Log.w("WinMali-Stream", "Unable to skip requested input bytes", error);
         }
+        return bytesSkipped;
     }
 
     public static byte[] copyToByteArray(InputStream inStream) {
