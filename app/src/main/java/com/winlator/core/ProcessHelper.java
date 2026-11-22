@@ -127,16 +127,19 @@ public abstract class ProcessHelper {
     private static int getProcessId(java.lang.Process process) {
         if (process == null) return -1;
         try {
-            // WinMali's minSdk is 29, where Process.pid() is available. Using
-            // reflective access to ProcessImpl's private fields fails on newer
-            // JVMs and can prevent a successfully started process being tracked.
-            long pid = process.pid();
-            return pid > 0 && pid <= Integer.MAX_VALUE ? (int)pid : -1;
+            // Resolve pid() from the public base class reflectively because some
+            // Android compile SDK stubs omit it even when the runtime provides it.
+            java.lang.reflect.Method pidMethod = java.lang.Process.class.getMethod("pid");
+            Object value = pidMethod.invoke(process);
+            if (value instanceof Number) {
+                long pid = ((Number)value).longValue();
+                if (pid > 0 && pid <= Integer.MAX_VALUE) return (int)pid;
+            }
         }
-        catch (RuntimeException error) {
+        catch (ReflectiveOperationException | RuntimeException error) {
             android.util.Log.w("WinMali-Process", "Unable to retrieve child process ID", error);
-            return -1;
         }
+        return -1;
     }
 
     private static boolean hasDebugCallbacks() {
