@@ -92,6 +92,15 @@ public abstract class ProcessHelper {
             }
 
             java.lang.Process process = processBuilder.start();
+            // This launcher has no API for writing to child stdin. Close the
+            // pipe immediately so commands waiting for EOF do not hang forever.
+            try {
+                process.getOutputStream().close();
+            }
+            catch (IOException error) {
+                process.destroyForcibly();
+                throw error;
+            }
             int processId = getProcessId(process);
             if (processId <= 0) {
                 process.destroyForcibly();
