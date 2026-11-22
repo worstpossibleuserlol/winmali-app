@@ -16,7 +16,7 @@ public class WineInfo implements Parcelable {
     public static final String MAIN_WINE_VERSION = "10.10";
     public static final WineInfo MAIN_WINE_INFO = new WineInfo(MAIN_WINE_VERSION);
     private static final Pattern VERSION_OUTPUT_PATTERN = Pattern.compile(
-        "^wine\\-([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][A-Za-z0-9][A-Za-z0-9.-]*)?)",
+        "^wine\\-([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][A-Za-z0-9][A-Za-z0-9.-]*)?)(?=\\s|\\(|$)",
         Pattern.CASE_INSENSITIVE);
     public final String version;
     public final String subversion;
