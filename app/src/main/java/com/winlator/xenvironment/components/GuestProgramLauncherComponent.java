@@ -8,7 +8,10 @@ import androidx.preference.PreferenceManager;
 
 import com.winlator.box64.Box64Preset;
 import com.winlator.box64.Box64PresetManager;
+import com.winlator.R;
+import com.winlator.core.AppUtils;
 import com.winlator.core.Callback;
+import com.winlator.core.CompatibilityRuntimePackage;
 import com.winlator.core.DefaultVersion;
 import com.winlator.core.EnvVars;
 import com.winlator.core.FileUtils;
@@ -35,7 +38,11 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
     public void start() {
         synchronized (lock) {
             stop();
-            extractBox64File();
+            if (!extractBox64File()) {
+                AppUtils.showToast(environment.getContext(), R.string.unable_to_install_compatibility_runtime);
+                if (terminationCallback != null) terminationCallback.call(1);
+                return;
+            }
             copyDefaultBox64RCFile();
             pid = execGuestProgram();
         }
@@ -115,16 +122,24 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         });
     }
 
-    private void extractBox64File() {
+    private boolean extractBox64File() {
         Context context = environment.getContext();
         SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
         String box64Version = preferences.getString("box64_version", DefaultVersion.BOX64);
         String currentBox64Version = preferences.getString("current_box64_version", "");
+        File box64Binary = new File(environment.getRootFS().getRootDir(), "usr/local/bin/box64");
 
-        if (!box64Version.equals(currentBox64Version)) {
-            GeneralComponents.extractFile(GeneralComponents.Type.BOX64, context, box64Version, DefaultVersion.BOX64);
-            preferences.edit().putString("current_box64_version", box64Version).apply();
+        if (!box64Version.equals(currentBox64Version) || !CompatibilityRuntimePackage.isAarch64Elf(box64Binary)) {
+            String installedVersion = GeneralComponents.extractFileResolvedVersion(
+                GeneralComponents.Type.BOX64, context, box64Version, DefaultVersion.BOX64, null);
+            if (installedVersion == null) return false;
+            preferences.edit().putString("current_box64_version", installedVersion).apply();
+            if (!installedVersion.equals(box64Version)) {
+                AppUtils.showToast(context, R.string.compatibility_runtime_fallback);
+            }
         }
+
+        return CompatibilityRuntimePackage.isAarch64Elf(box64Binary);
     }
 
     private void copyDefaultBox64RCFile() {
