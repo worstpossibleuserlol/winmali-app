@@ -27,7 +27,7 @@ public class GraphicsDriversTest {
 
     @Test
     public void restoresBothDefaultsForUnknownOrMalformedPair() {
-        assertArrayEquals(new String[]{GraphicsDrivers.DEFAULT_VULKAN_DRIVER, GraphicsDrivers.DEFAULT_OPENGL_DRIVER},
+        assertArrayEquals(new String[]{GraphicsDrivers.DEFAULT_VULKAN_DRIVER, GraphicsDrivers.VIRGL},
             GraphicsDrivers.parseIdentifiers(",virgl"));
         assertArrayEquals(new String[]{GraphicsDrivers.DEFAULT_VULKAN_DRIVER, GraphicsDrivers.DEFAULT_OPENGL_DRIVER},
             GraphicsDrivers.parseIdentifiers("unknown,invalid"));
