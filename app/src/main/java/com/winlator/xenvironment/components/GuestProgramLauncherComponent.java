@@ -131,10 +131,14 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         String command = rootDir+"/usr/local/bin/box64 "+guestExecutable;
 
         return ProcessHelper.exec(command, envVars, rootDir, outputCallback, (status) -> {
+            boolean isCurrentProcess;
             synchronized (lock) {
-                if (processGeneration == generation) pid = -1;
+                isCurrentProcess = processGeneration == generation;
+                if (isCurrentProcess) pid = -1;
             }
-            if (terminationCallback != null) terminationCallback.call(status);
+            // A stopped/replaced process must not trigger the callback belonging
+            // to a newer launch on this same component.
+            if (isCurrentProcess && terminationCallback != null) terminationCallback.call(status);
         });
     }
 
