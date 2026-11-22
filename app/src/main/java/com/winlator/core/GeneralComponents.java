@@ -200,7 +200,7 @@ public abstract class GeneralComponents {
     }
 
     public static String getDefinitivePath(Type type, Context context, String identifier) {
-        if (identifier.isEmpty()) return null;
+        if (identifier == null || identifier.isEmpty()) return null;
         if (type == Type.SOUNDFONT && isBuiltinComponent(type, identifier)) {
             File destination = type.getDestination(context);
             FileUtils.clear(destination);
