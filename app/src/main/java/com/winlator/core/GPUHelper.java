@@ -154,6 +154,7 @@ public abstract class GPUHelper {
     }
 
     public static String glGetRenderer(Context context) {
+        if (context == null) return "";
         final SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
         String value = preferences.getString("gpu_renderer", "");
         if (!value.isEmpty()) return value;
@@ -163,6 +164,7 @@ public abstract class GPUHelper {
     }
 
     public static String glGetVendor(Context context) {
+        if (context == null) return "";
         final SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
         String value = preferences.getString("gpu_vendor", "");
         if (!value.isEmpty()) return value;
@@ -172,6 +174,7 @@ public abstract class GPUHelper {
     }
 
     public static String glGetVersion(Context context) {
+        if (context == null) return "";
         final SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
         String value = preferences.getString("gpu_version", "");
         if (!value.isEmpty()) return value;
@@ -186,37 +189,23 @@ public abstract class GPUHelper {
     }
 
     public static int vkMakeVersion(String value) {
-        final Pattern pattern = Pattern.compile("([0-9]+)\\.([0-9]+)\\.?([0-9]+)?");
-        Matcher matcher = pattern.matcher(value);
-        if (matcher.find()) {
-            try {
-                int major = matcher.group(1) != null ? Integer.parseInt(matcher.group(1)) : 0;
-                int minor = matcher.group(2) != null ? Integer.parseInt(matcher.group(2)) : 0;
-                int patch = matcher.group(3) != null ? Integer.parseInt(matcher.group(3)) : 0;
-                if (matcher.group(1) == null && patch == 0) patch = minor;
-                return vkMakeVersion(major, minor, patch);
-            }
-            catch (NumberFormatException e) {
-                return 0;
-            }
-        }
-        else return 0;
+        return VulkanVersion.makeVersion(value);
     }
 
     public static int vkMakeVersion(int major, int minor, int patch) {
-        return  ((major) << 22) | ((minor) << 12) | (patch);
+        return VulkanVersion.makeVersion(major, minor, patch);
     }
 
     public static int vkVersionMajor(int version) {
-        return (version) >> 22;
+        return VulkanVersion.major(version);
     }
 
     public static int vkVersionMinor(int version) {
-        return ((version) >> 12) & 0x3FF;
+        return VulkanVersion.minor(version);
     }
 
     public static int vkVersionPatch(int version) {
-        return (version) & 0xFFF;
+        return VulkanVersion.patch(version);
     }
 
     public static native String[] vkGetDeviceExtensions();

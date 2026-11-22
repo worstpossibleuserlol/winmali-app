@@ -10,6 +10,7 @@ public abstract class DXWrappers {
     public static final String D7VK = "d7vk";
 
     public static String getName(String identifier) {
+        if (identifier == null) return "None";
         switch (identifier) {
             case WINED3D: return "WineD3D";
             case DXVK: return "DXVK";
@@ -22,7 +23,8 @@ public abstract class DXWrappers {
 
     public static String parseIdentifier(String dxwrapper) {
         if (dxwrapper == null || dxwrapper.isEmpty()) return Container.DEFAULT_DXWRAPPER;
-        return dxwrapper.equals(WINED3D) || dxwrapper.equals(DXVK) ? dxwrapper : Container.DEFAULT_DXWRAPPER;
+        return dxwrapper.equals(WINED3D) || dxwrapper.equals(DXVK) || dxwrapper.equals(VKD3D) ?
+            dxwrapper : Container.DEFAULT_DXWRAPPER;
     }
 
     public static KeyValueSet[] parseConfigs(String dxwrapper, String dxwrapperConfig) {
