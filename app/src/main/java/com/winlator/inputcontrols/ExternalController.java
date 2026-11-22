@@ -241,7 +241,10 @@ public class ExternalController implements GamepadSlot {
     }
 
     public static ExternalController getController(String id) {
-        for (ExternalController controller : getControllers()) if (controller.getId().equals(id)) return controller;
+        if (id == null || id.isEmpty()) return null;
+        for (ExternalController controller : getControllers()) {
+            if (id.equals(controller.getId())) return controller;
+        }
         return null;
     }
 
