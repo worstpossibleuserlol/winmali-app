@@ -173,29 +173,61 @@ public abstract class ZipUtils {
         File parent = destination.getAbsoluteFile().getParentFile();
         if (parent == null || (!parent.isDirectory() && !parent.mkdirs())) return false;
         File staging = new File(parent, destination.getName()+".zip-stage-"+UUID.randomUUID());
+        File backup = new File(parent, destination.getName()+".zip-backup-"+UUID.randomUUID());
         if (!staging.mkdirs()) return false;
+        boolean backupCreated = false;
 
-        boolean success = false;
         try {
             if (!extractToDirectory(source, staging)) return false;
-            if (destination.exists() && !FileUtils.delete(destination)) return false;
+            if (destination.exists()) {
+                if (!destination.isDirectory()) return false;
+                try {
+                    Files.move(destination.toPath(), backup.toPath(), StandardCopyOption.ATOMIC_MOVE);
+                }
+                catch (AtomicMoveNotSupportedException e) {
+                    Files.move(destination.toPath(), backup.toPath());
+                }
+                backupCreated = true;
+            }
+
             try {
-                Files.move(staging.toPath(), destination.toPath(), StandardCopyOption.ATOMIC_MOVE);
+                try {
+                    Files.move(staging.toPath(), destination.toPath(), StandardCopyOption.ATOMIC_MOVE);
+                }
+                catch (AtomicMoveNotSupportedException e) {
+                    Files.move(staging.toPath(), destination.toPath());
+                }
             }
-            catch (AtomicMoveNotSupportedException e) {
-                Files.move(staging.toPath(), destination.toPath());
+            catch (IOException activationError) {
+                if (backupCreated && backup.exists() && !destination.exists()) {
+                    Files.move(backup.toPath(), destination.toPath());
+                    backupCreated = false;
+                }
+                return false;
             }
-            success = destination.isDirectory();
-            return success;
+
+            if (!destination.isDirectory()) {
+                if (backupCreated && backup.exists()) {
+                    Files.move(backup.toPath(), destination.toPath());
+                    backupCreated = false;
+                }
+                return false;
+            }
+
+            if (backupCreated) {
+                FileUtils.delete(backup);
+                backupCreated = false;
+            }
+            return true;
         }
         catch (IOException | RuntimeException e) {
             return false;
         }
         finally {
             if (staging.exists()) FileUtils.delete(staging);
-            if (!success && destination.exists() && destination.isDirectory()) {
-                // A failed activation must not leave a half-written directory.
-                FileUtils.delete(destination);
+            if (backupCreated && backup.exists()) {
+                if (!destination.exists()) backup.renameTo(destination);
+                else FileUtils.delete(backup);
             }
         }
     }
