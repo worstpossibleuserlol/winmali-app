@@ -199,6 +199,7 @@ public abstract class GeneralComponents {
         if (entries == null) return result;
 
         for (File entry : entries) {
+            if (FileUtils.isSymlink(entry)) continue;
             String name = entry.getName();
             boolean supported;
             if (type == Type.SOUNDFONT) {
@@ -224,7 +225,8 @@ public abstract class GeneralComponents {
     }
 
     public static String getDefinitivePath(Type type, Context context, String identifier) {
-        if (identifier == null || identifier.isEmpty()) return null;
+        if (type == null || context == null || identifier == null || identifier.isEmpty()) return null;
+        if (type.isVersioned() && !CompatibilityRuntimePackage.isValidVersionName(identifier)) return null;
         if (type == Type.SOUNDFONT && isBuiltinComponent(type, identifier)) {
             File destination = type.getDestination(context);
             FileUtils.clear(destination);
@@ -236,7 +238,8 @@ public abstract class GeneralComponents {
             return destination.getPath();
         }
         else if (type == Type.ADRENOTOOLS_DRIVER) {
-            if (isBuiltinComponent(type, identifier)) return null;
+            if (isBuiltinComponent(type, identifier) ||
+                !identifier.matches("[A-Za-z0-9._-]+") || identifier.equals(".") || identifier.equals("..")) return null;
             File libraryFile = getAdrenotoolsLibraryFile(type.getSource(context, identifier));
             return libraryFile != null ? libraryFile.getPath() : null;
         }
@@ -259,6 +262,8 @@ public abstract class GeneralComponents {
     public static String extractFileResolvedVersion(Type type, Context context, String identifier,
             String defaultVersion, TarCompressorUtils.OnExtractFileListener onExtractFileListener) {
         if (type == null || context == null || identifier == null || identifier.isEmpty()) return null;
+        if (type.isVersioned() && (!CompatibilityRuntimePackage.isValidVersionName(identifier) ||
+            (defaultVersion != null && !CompatibilityRuntimePackage.isValidVersionName(defaultVersion)))) return null;
         File destination = type.getDestination(context);
 
         if (isBuiltinComponent(type, identifier)) {
