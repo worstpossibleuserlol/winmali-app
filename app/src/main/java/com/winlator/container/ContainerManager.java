@@ -8,10 +8,10 @@ import android.system.Os;
 
 import com.winlator.R;
 import com.winlator.core.Callback;
-import com.winlator.core.CompatibilityRuntimePackage;
 import com.winlator.core.FileUtils;
 import com.winlator.core.TarCompressorUtils;
 import com.winlator.core.WineInfo;
+import com.winlator.core.WineInstaller;
 import com.winlator.xenvironment.RootFSInstaller;
 import com.winlator.xenvironment.RootFS;
 
@@ -332,14 +332,9 @@ public class ContainerManager {
                 File installedWineDir = RootFS.find(context).getInstalledWineDir();
                 File runtime = new File(installedWineDir, container.getWineVersion());
                 File pattern = new File(installedWineDir, "container-pattern-"+info.fullVersion()+".tzst");
-                File bin = new File(runtime, "bin");
-                File wine = new File(bin, "wine");
-                File wine64 = new File(bin, "wine64");
-                boolean hasArm64Wine = CompatibilityRuntimePackage.isAarch64Elf(wine) ||
-                    CompatibilityRuntimePackage.isAarch64Elf(wine64);
                 if (info.path == null || !info.identifier().equals(container.getWineVersion()) ||
-                    !runtime.isDirectory() || (!wine.isFile() && !wine64.isFile()) ||
-                    !hasArm64Wine || !pattern.isFile() || pattern.length() == 0) return null;
+                    WineInstaller.findWineExecutable(runtime) == null ||
+                    !pattern.isFile() || pattern.length() == 0) return null;
             }
 
             File destination = new File(homeDir, RootFS.USER+"-"+container.id);
@@ -529,12 +524,7 @@ public class ContainerManager {
         WineInfo info = WineInfo.fromIdentifier(context, wineVersion);
         File runtime = new File(rootFS.getInstalledWineDir(), wineVersion);
         File pattern = new File(rootFS.getInstalledWineDir(), "container-pattern-"+info.fullVersion()+".tzst");
-        File bin = new File(runtime, "bin");
-        File wine = new File(bin, "wine");
-        File wine64 = new File(bin, "wine64");
-        if (info.path == null || !runtime.isDirectory() ||
-            (!CompatibilityRuntimePackage.isAarch64Elf(wine) &&
-             !CompatibilityRuntimePackage.isAarch64Elf(wine64)) ||
+        if (info.path == null || WineInstaller.findWineExecutable(runtime) == null ||
             !pattern.isFile() || pattern.length() == 0) {
             lastCreateError = R.string.container_create_custom_runtime_missing;
             return false;
