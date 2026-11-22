@@ -67,8 +67,10 @@ public class RootFS {
         File bin = new File(wine, "bin");
         File wineBinary = new File(bin, "wine");
         File wine64Binary = new File(bin, "wine64");
-        boolean hasWine = CompatibilityRuntimePackage.isAarch64Elf(wine64Binary) ||
-            CompatibilityRuntimePackage.isAarch64Elf(wineBinary);
+        // The bundled Wine is x86-64 and is run through the AArch64 Box64
+        // runtime. Also accept native AArch64 Wine packages for compatibility.
+        boolean hasWine = CompatibilityRuntimePackage.isSupportedWineElf(wine64Binary) ||
+            CompatibilityRuntimePackage.isSupportedWineElf(wineBinary);
         File x64Libraries = new File(wine, "lib/wine/x86_64-windows");
         File x86Libraries = new File(wine, "lib/wine/i386-windows");
         File[] x64Files = x64Libraries.listFiles();
