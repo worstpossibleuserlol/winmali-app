@@ -250,19 +250,27 @@ public abstract class GeneralComponents {
 
         if (isBuiltinComponent(type, identifier)) {
             String sourcePath = type.assetFolder()+"/"+type.lowerName()+"-"+identifier+".tzst";
-            return TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context, sourcePath, destination,
-                onExtractFileListener) ? identifier : null;
+            boolean extracted = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context, sourcePath, destination,
+                onExtractFileListener);
+            return extracted && isExtractedComponentUsable(type, context) ? identifier : null;
         }
 
         File componentDir = getComponentDir(type, context);
         File source = new File(componentDir, type.lowerName()+"-"+identifier+".tzst");
         if (source.isFile() && TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, source, destination,
-                onExtractFileListener)) return identifier;
+                onExtractFileListener) && isExtractedComponentUsable(type, context)) return identifier;
 
         if (defaultVersion == null || defaultVersion.isEmpty()) return null;
         String fallbackPath = type.assetFolder()+"/"+type.lowerName()+"-"+defaultVersion+".tzst";
-        return TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context, fallbackPath, destination,
-            onExtractFileListener) ? defaultVersion : null;
+        boolean fallbackExtracted = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context,
+            fallbackPath, destination, onExtractFileListener);
+        return fallbackExtracted && isExtractedComponentUsable(type, context) ? defaultVersion : null;
+    }
+
+    private static boolean isExtractedComponentUsable(Type type, Context context) {
+        if (type != Type.BOX64) return true;
+        File box64 = new File(RootFS.find(context).getRootDir(), "usr/local/bin/box64");
+        return CompatibilityRuntimePackage.isAarch64Elf(box64);
     }
 
     private static String parseDisplayText(Type type, String filename) {
