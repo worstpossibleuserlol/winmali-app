@@ -272,7 +272,10 @@ public class ContainerManager {
             }
 
             container.setRootDir(destination);
-            container.saveData();
+            if (!container.saveData()) {
+                FileUtils.delete(destination);
+                return null;
+            }
             containers.add(container);
             maxContainerId = Math.max(maxContainerId, container.id);
             return container;
@@ -455,7 +458,8 @@ public class ContainerManager {
     }
 
     private synchronized void duplicateContainer(Container srcContainer) {
-        if (srcContainer == null || srcContainer.getRootDir() == null || !srcContainer.getRootDir().isDirectory()) return;
+        if (srcContainer == null || srcContainer.getRootDir() == null ||
+            !srcContainer.getRootDir().isDirectory()) return;
         int id = nextAvailableContainerId();
 
         File dstDir = new File(homeDir, RootFS.USER+"-"+id);
@@ -468,24 +472,20 @@ public class ContainerManager {
 
         Container dstContainer = new Container(id);
         dstContainer.setRootDir(dstDir);
+        try {
+            JSONObject copiedConfig = new JSONObject(FileUtils.readString(dstContainer.getConfigFile()));
+            dstContainer.loadData(copiedConfig);
+        }
+        catch (JSONException | RuntimeException error) {
+            FileUtils.delete(dstDir);
+            return;
+        }
+
         dstContainer.setName(srcContainer.getName()+" ("+context.getString(R.string.copy)+")");
-        dstContainer.setScreenSize(srcContainer.getScreenSize());
-        dstContainer.setEnvVars(srcContainer.getEnvVars());
-        dstContainer.setCPUList(srcContainer.getCPUList());
-        dstContainer.setCPUListWoW64(srcContainer.getCPUListWoW64());
-        dstContainer.setGraphicsDriver(srcContainer.getGraphicsDriver());
-        dstContainer.setGraphicsDriverConfig(srcContainer.getGraphicsDriverConfig());
-        dstContainer.setDXWrapper(srcContainer.getDXWrapper());
-        dstContainer.setDXWrapperConfig(srcContainer.getDXWrapperConfig());
-        dstContainer.setAudioDriver(srcContainer.getAudioDriver());
-        dstContainer.setAudioDriverConfig(srcContainer.getAudioDriverConfig());
-        dstContainer.setWinComponents(srcContainer.getWinComponents());
-        dstContainer.setDrives(srcContainer.getDrives());
-        dstContainer.setHUDMode(srcContainer.getHUDMode());
-        dstContainer.setStartupSelection(srcContainer.getStartupSelection());
-        dstContainer.setBox64Preset(srcContainer.getBox64Preset());
-        dstContainer.setDesktopTheme(srcContainer.getDesktopTheme());
-        dstContainer.saveData();
+        if (!dstContainer.saveData()) {
+            FileUtils.delete(dstDir);
+            return;
+        }
 
         maxContainerId = Math.max(maxContainerId, id);
         containers.add(dstContainer);
