@@ -26,7 +26,7 @@ public final class CompatibilityRuntimePackage {
 
     public static String normalizeRelativePath(String path) {
         if (path == null || path.isEmpty()) return null;
-        String normalized = path.replace('\\\\', '/');
+        String normalized = path.replace('\\', '/');
         while (normalized.startsWith("./")) normalized = normalized.substring(2);
         if (normalized.isEmpty() || normalized.startsWith("/") ||
             normalized.matches("^[A-Za-z]:.*") || normalized.indexOf('\u0000') >= 0) return null;
