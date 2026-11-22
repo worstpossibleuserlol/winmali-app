@@ -542,12 +542,15 @@ public class InputControlsView extends View {
     }
 
     public Bitmap getIcon(byte id) {
+        if (!ControlElement.isValidIconId(id, icons.length)) return null;
         if (icons[id] == null) {
             Context context = getContext();
             try (InputStream is = context.getAssets().open("inputcontrols/icons/"+id+".png")) {
                 icons[id] = BitmapFactory.decodeStream(is);
             }
-            catch (IOException e) {}
+            catch (IOException | RuntimeException error) {
+                return null;
+            }
         }
         return icons[id];
     }
