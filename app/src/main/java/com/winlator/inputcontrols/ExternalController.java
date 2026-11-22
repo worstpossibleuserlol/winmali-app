@@ -75,23 +75,35 @@ public class ExternalController implements GamepadSlot {
 
     public int getDeviceId() {
         if (id == null || id.isEmpty()) return -1;
-        if (this.deviceId == -1) {
-            for (int deviceId : InputDevice.getDeviceIds()) {
-                InputDevice device = InputDevice.getDevice(deviceId);
-                if (device != null && id.equals(device.getDescriptor())) {
-                    this.deviceId = deviceId;
-                    break;
-                }
+
+        // Android device IDs are transient and may change after Bluetooth reconnects.
+        if (deviceId != -1) {
+            InputDevice cachedDevice = InputDevice.getDevice(deviceId);
+            if (cachedDevice != null && hasMatchingDescriptor(id, cachedDevice.getDescriptor())) {
+                return deviceId;
+            }
+            deviceId = -1;
+        }
+
+        for (int candidateId : InputDevice.getDeviceIds()) {
+            InputDevice device = InputDevice.getDevice(candidateId);
+            if (device != null && hasMatchingDescriptor(id, device.getDescriptor())) {
+                deviceId = candidateId;
+                break;
             }
         }
-        return this.deviceId;
+        return deviceId;
+    }
+
+    static boolean hasMatchingDescriptor(String expected, String actual) {
+        return expected != null && !expected.isEmpty() && expected.equals(actual);
     }
 
     public boolean isConnected() {
         if (id == null || id.isEmpty()) return false;
         for (int deviceId : InputDevice.getDeviceIds()) {
             InputDevice device = InputDevice.getDevice(deviceId);
-            if (device != null && id.equals(device.getDescriptor())) return true;
+            if (device != null && hasMatchingDescriptor(id, device.getDescriptor())) return true;
         }
         return false;
     }
@@ -243,7 +255,7 @@ public class ExternalController implements GamepadSlot {
     public static ExternalController getController(String id) {
         if (id == null || id.isEmpty()) return null;
         for (ExternalController controller : getControllers()) {
-            if (id.equals(controller.getId())) return controller;
+            if (hasMatchingDescriptor(id, controller.getId())) return controller;
         }
         return null;
     }
@@ -294,12 +306,14 @@ public class ExternalController implements GamepadSlot {
     }
 
     public static float getCenteredAxis(MotionEvent event, int axis, int historyPos) {
+        if (event == null) return 0;
         if (axis == MotionEvent.AXIS_HAT_X || axis == MotionEvent.AXIS_HAT_Y) {
             float value = event.getAxisValue(axis);
             if (Math.abs(value) == 1.0f) return value;
         }
         else {
             InputDevice device = event.getDevice();
+            if (device == null) return 0;
             InputDevice.MotionRange range = device.getMotionRange(axis, event.getSource());
             if (range != null) {
                 float flat = range.getFlat();
