@@ -129,14 +129,12 @@ public abstract class ProcessHelper {
         // supported API level. Try the public method when present, then use the
         // ProcessBuilder implementation's PID field as a compatibility fallback.
         try {
-            java.lang.reflect.Method pidMethod = process.getClass().getMethod("pid");
-            Object value = pidMethod.invoke(process);
-            if (value instanceof Number) {
-                long pid = ((Number)value).longValue();
-                if (pid > 0 && pid <= Integer.MAX_VALUE) return (int)pid;
-            }
+            // Process.pid() is public on Android API 26+ and avoids reflective
+            // access to hidden fields on java.lang.Process implementation classes.
+            long pid = process.pid();
+            if (pid > 0 && pid <= Integer.MAX_VALUE) return (int)pid;
         }
-        catch (ReflectiveOperationException | RuntimeException ignored) {}
+        catch (UnsupportedOperationException | SecurityException ignored) {}
 
         Class<?> processClass = process.getClass();
         while (processClass != null) {
