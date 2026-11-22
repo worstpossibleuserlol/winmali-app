@@ -27,11 +27,41 @@ public abstract class WineInstaller {
         return thread;
     });
 
+    private static boolean restoreHomeLink(File linkFile, boolean hadOriginalSymlink, String originalTarget) {
+        boolean restored;
+        if (hadOriginalSymlink) {
+            restored = originalTarget != null && !originalTarget.isEmpty() &&
+                FileUtils.symlink(originalTarget, linkFile.getPath());
+        }
+        else {
+            restored = !linkFile.exists() && !FileUtils.isSymlink(linkFile) || FileUtils.delete(linkFile);
+        }
+
+        if (!restored) {
+            android.util.Log.e("WinMali-Wine", "Unable to restore rootfs home link: "+linkFile);
+            // Never leave HOME pointing into a staging directory that will be deleted.
+            if (FileUtils.isSymlink(linkFile)) FileUtils.delete(linkFile);
+        }
+        return restored;
+    }
+
+    private static void clearWinePreinstall(File installedWineDir) {
+        File preinstall = new File(installedWineDir, "preinstall");
+        if ((preinstall.exists() || FileUtils.isSymlink(preinstall)) && !FileUtils.delete(preinstall)) {
+            android.util.Log.e("WinMali-Wine", "Unable to remove Wine staging directory: "+preinstall);
+        }
+    }
+
     public static void generateWineprefix(WineInfo wineInfo, XEnvironment environment) {
+        if (wineInfo == null || wineInfo.path == null || environment == null ||
+            environment.getContext() == null || environment.getRootFS() == null) return;
+        if (!(environment.getContext() instanceof Activity)) return;
+
         Activity activity = (Activity)environment.getContext();
         RootFS rootFS = environment.getRootFS();
         final File rootDir = rootFS.getRootDir();
         final File installedWineDir = rootFS.getInstalledWineDir();
+        if (rootDir == null || installedWineDir == null) return;
         rootFS.setWinePath(wineInfo.path);
 
         final File containerPatternDir = new File(installedWineDir, "/preinstall/container-pattern");
@@ -54,8 +84,20 @@ public abstract class WineInstaller {
         }
 
         File linkFile = new File(rootDir, RootFS.HOME_PATH);
+        final boolean hadOriginalHomeSymlink = FileUtils.isSymlink(linkFile);
+        final String originalHomeTarget = hadOriginalHomeSymlink ? FileUtils.readSymlink(linkFile) : null;
+        if (!hadOriginalHomeSymlink && linkFile.exists()) {
+            clearWinePreinstall(installedWineDir);
+            AppUtils.showToast(activity, R.string.unable_to_install_wine);
+            return;
+        }
+        if (hadOriginalHomeSymlink && (originalHomeTarget == null || originalHomeTarget.isEmpty())) {
+            clearWinePreinstall(installedWineDir);
+            AppUtils.showToast(activity, R.string.unable_to_install_wine);
+            return;
+        }
         if (!FileUtils.symlink(containerPatternDir.getPath(), linkFile.getPath())) {
-            FileUtils.delete(new File(installedWineDir, "/preinstall"));
+            clearWinePreinstall(installedWineDir);
             AppUtils.showToast(activity, R.string.unable_to_install_wine);
             return;
         }
@@ -65,16 +107,18 @@ public abstract class WineInstaller {
         final PreloaderDialog preloaderDialog = new PreloaderDialog(activity);
         guestProgramLauncherComponent.setTerminationCallback((status) -> OPERATIONS.execute(() -> {
             if (status != 0) {
+                restoreHomeLink(linkFile, hadOriginalHomeSymlink, originalHomeTarget);
+                clearWinePreinstall(installedWineDir);
                 AppUtils.showToast(activity, R.string.unable_to_install_wine);
-                FileUtils.delete(new File(installedWineDir, "/preinstall"));
                 AppUtils.restartApplication(activity);
                 return;
             }
 
             preloaderDialog.showOnUiThread(R.string.finishing_installation);
             if (!FileUtils.writeString(new File(rootDir, RootFS.WINEPREFIX+"/.update-timestamp"), "disable\n")) {
+                restoreHomeLink(linkFile, hadOriginalHomeSymlink, originalHomeTarget);
+                clearWinePreinstall(installedWineDir);
                 AppUtils.showToast(activity, R.string.unable_to_install_wine);
-                FileUtils.delete(new File(installedWineDir, "/preinstall"));
                 preloaderDialog.closeOnUiThread();
                 AppUtils.restartApplication(activity);
                 return;
@@ -87,8 +131,9 @@ public abstract class WineInstaller {
                     if (FileUtils.isSymlink(userFile)) {
                         String path = userFile.getPath();
                         if (!FileUtils.delete(userFile) || !(new File(path)).mkdirs()) {
+                            restoreHomeLink(linkFile, hadOriginalHomeSymlink, originalHomeTarget);
+                            clearWinePreinstall(installedWineDir);
                             AppUtils.showToast(activity, R.string.unable_to_install_wine);
-                            FileUtils.delete(new File(installedWineDir, "/preinstall"));
                             preloaderDialog.closeOnUiThread();
                             AppUtils.restartApplication(activity);
                             return;
@@ -107,16 +152,19 @@ public abstract class WineInstaller {
                 new File(wineInfo.path).renameTo(installedWinePath);
 
             if (!installationSucceeded) {
+                restoreHomeLink(linkFile, hadOriginalHomeSymlink, originalHomeTarget);
                 FileUtils.delete(installedPatternFile);
                 FileUtils.delete(containerPatternFile);
-                FileUtils.delete(new File(installedWineDir, "/preinstall"));
+                clearWinePreinstall(installedWineDir);
                 AppUtils.showToast(activity, R.string.unable_to_install_wine);
                 preloaderDialog.closeOnUiThread();
                 AppUtils.restartApplication(activity);
                 return;
             }
 
-            FileUtils.delete(new File(installedWineDir, "/preinstall"));
+            // Restore the active container link before deleting the temporary prefix.
+            restoreHomeLink(linkFile, hadOriginalHomeSymlink, originalHomeTarget);
+            clearWinePreinstall(installedWineDir);
 
             preloaderDialog.closeOnUiThread();
             AppUtils.RestartApplicationOptions options = new AppUtils.RestartApplicationOptions();
