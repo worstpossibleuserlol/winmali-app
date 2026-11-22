@@ -467,7 +467,9 @@ public class WinHandler {
         try {
             localhost = InetAddress.getByName("127.0.0.1");
             newSocket = new DatagramSocket(null);
-            newSocket.setReuseAddress(true);
+            // This is a single-instance control endpoint. Do not allow two
+            // WinMali sessions to share the guest-control port.
+            newSocket.setReuseAddress(false);
             newSocket.bind(new InetSocketAddress((InetAddress)null, SERVER_PORT));
             socket = newSocket;
             initReceived = false;
