@@ -175,6 +175,61 @@ public class TarCompressorUtilsTest {
     }
 
     @Test
+    public void allowsRepeatedDirectoryHeadersFromLayeredRootfsArchives() throws IOException {
+        File archive = createArchive(EntrySpec.directory("usr"),
+            EntrySpec.directory("usr"), EntrySpec.file("usr/bin/tool", "payload"));
+        File destination = new File(temporaryFolder.getRoot(), "repeated-directories");
+
+        assertTrue(TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, archive, destination));
+        assertEquals("payload", FileUtils.readString(new File(destination, "usr/bin/tool")));
+    }
+
+    @Test
+    public void rebasesAbsoluteGuestSymlinksInsideExtractionRoot() throws IOException {
+        File archive = createArchive(EntrySpec.directory("usr"),
+            EntrySpec.symlink("usr/bin", "/bin"));
+        File destination = new File(temporaryFolder.getRoot(), "absolute-guest-link");
+
+        assertTrue(TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, archive, destination));
+        File link = new File(destination, "usr/bin");
+        assertTrue(Files.isSymbolicLink(link.toPath()));
+        assertEquals(java.nio.file.Paths.get("../bin"), Files.readSymbolicLink(link.toPath()));
+    }
+
+    @Test
+    public void rejectsAbsoluteGuestSymlinkThatTraversesAboveRoot() throws IOException {
+        File archive = createArchive(EntrySpec.symlink("escape", "/../../outside"));
+        File destination = new File(temporaryFolder.getRoot(), "absolute-link-escape");
+
+        assertFalse(TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, archive, destination));
+        assertFalse(new File(temporaryFolder.getRoot(), "outside").exists());
+    }
+
+    @Test
+    public void extractsSafeHardLinkAsIndependentFileCopy() throws IOException {
+        File archive = createArchive(EntrySpec.file("usr/bin/tool", "linked-payload"),
+            new EntrySpec("usr/bin/tool-copy", TarArchiveEntry.LF_LINK,
+                "usr/bin/tool", new byte[0], false));
+        File destination = new File(temporaryFolder.getRoot(), "hard-link-copy");
+
+        assertTrue(TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, archive, destination));
+        File copied = new File(destination, "usr/bin/tool-copy");
+        assertTrue(copied.isFile());
+        assertFalse(Files.isSymbolicLink(copied.toPath()));
+        assertEquals("linked-payload", FileUtils.readString(copied));
+    }
+
+    @Test
+    public void rejectsHardLinkTargetsOutsideExtractionRoot() throws IOException {
+        File archive = createArchive(new EntrySpec("linked", TarArchiveEntry.LF_LINK,
+            "../outside", new byte[0], false));
+        File destination = new File(temporaryFolder.getRoot(), "hard-link-escape");
+
+        assertFalse(TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, archive, destination));
+        assertFalse(new File(temporaryFolder.getRoot(), "outside").exists());
+    }
+
+    @Test
     public void rejectsSymlinkThatEscapesExtractionRoot() throws IOException {
         File archive = createArchive(
             EntrySpec.symlink("escape", "../outside"),
