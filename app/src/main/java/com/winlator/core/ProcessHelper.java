@@ -15,6 +15,9 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.lang.reflect.Field;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -109,13 +112,39 @@ public abstract class ProcessHelper {
     }
 
     private static int getProcessId(java.lang.Process process) {
+        // Android's java.lang.Process does not expose Process.pid() on every
+        // supported API level. Try the public method when present, then use the
+        // ProcessBuilder implementation's PID field as a compatibility fallback.
         try {
-            long pid = process.pid();
-            return pid > 0 && pid <= Integer.MAX_VALUE ? (int)pid : -1;
+            java.lang.reflect.Method pidMethod = process.getClass().getMethod("pid");
+            Object value = pidMethod.invoke(process);
+            if (value instanceof Number) {
+                long pid = ((Number)value).longValue();
+                if (pid > 0 && pid <= Integer.MAX_VALUE) return (int)pid;
+            }
         }
-        catch (UnsupportedOperationException | SecurityException error) {
-            return -1;
+        catch (ReflectiveOperationException | RuntimeException ignored) {}
+
+        Class<?> processClass = process.getClass();
+        while (processClass != null) {
+            try {
+                Field pidField = processClass.getDeclaredField("pid");
+                pidField.setAccessible(true);
+                Object value = pidField.get(process);
+                if (value instanceof Number) {
+                    long pid = ((Number)value).longValue();
+                    if (pid > 0 && pid <= Integer.MAX_VALUE) return (int)pid;
+                }
+                return -1;
+            }
+            catch (NoSuchFieldException error) {
+                processClass = processClass.getSuperclass();
+            }
+            catch (ReflectiveOperationException | RuntimeException error) {
+                return -1;
+            }
         }
+        return -1;
     }
 
     private static boolean hasDebugCallbacks() {

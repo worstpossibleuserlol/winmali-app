@@ -225,7 +225,7 @@ public abstract class WineInstaller {
         launcher.setGuestExecutable(wineBinPath+" --version");
         launcher.setTerminationCallback((status) -> {
             if (hadOriginalSymlink && originalTarget != null && !originalTarget.isEmpty()) {
-                FileUtils.symlink(originalTarget, linkFile);
+                FileUtils.symlink(originalTarget, linkFile.getPath());
             }
             else FileUtils.delete(linkFile);
             callback.call(status == 0 ? wineInfoRef.get() : null);
