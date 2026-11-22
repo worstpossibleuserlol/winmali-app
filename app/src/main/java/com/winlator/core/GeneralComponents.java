@@ -317,8 +317,11 @@ public abstract class GeneralComponents {
             if (sourceTargets.isEmpty()) return false;
             Set<String> extractedSources = new HashSet<>();
             AtomicLong extractedBytes = new AtomicLong();
-            boolean[] overLimit = {false};
             boolean extracted = TarCompressorUtils.extract(compressedType, originFile, tempDir, (archiveFile, size) -> {
+                if (size > 0 && extractedBytes.addAndGet(size) > MAX_COMPONENT_IMPORT_BYTES) {
+                    throw new IllegalArgumentException("Compatibility runtime archive expands beyond the import limit");
+                }
+
                 try {
                     String rootPath = tempDir.getCanonicalPath();
                     String entryPath = archiveFile.getCanonicalPath();
@@ -327,23 +330,15 @@ public abstract class GeneralComponents {
                     String target = sourceTargets.get(relative);
                     if (target == null) return null;
 
-                    if (size > 0) {
-                        long total = extractedBytes.addAndGet(size);
-                        if (total > MAX_COMPONENT_IMPORT_BYTES) {
-                            overLimit[0] = true;
-                            return null;
-                        }
-                    }
                     extractedSources.add(relative);
                     return new File(tempDir, target);
                 }
                 catch (IOException error) {
-                    overLimit[0] = true;
                     return null;
                 }
             });
 
-            if (!extracted || overLimit[0] || extractedSources.size() != sourceTargets.size()) return false;
+            if (!extracted || extractedSources.size() != sourceTargets.size()) return false;
 
             if (type == Type.BOX64) {
                 File box64 = new File(tempDir, "usr/local/bin/box64");
@@ -353,7 +348,7 @@ public abstract class GeneralComponents {
             return TarCompressorUtils.compress(TarCompressorUtils.Type.ZSTD, new File(tempDir, "."),
                 output, MainActivity.CONTAINER_PATTERN_COMPRESSION_LEVEL);
         }
-        catch (JSONException error) {
+        catch (JSONException | RuntimeException error) {
             return false;
         }
         finally {
