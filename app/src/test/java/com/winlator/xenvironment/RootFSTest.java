@@ -128,4 +128,15 @@ public class RootFSTest {
         Files.write(new File(wine, "bin/wine").toPath(), unsupported);
         assertFalse(RootFS.hasCoreWineFiles(temporaryFolder.getRoot()));
     }
+    @Test
+    public void rejectsStructurallyValidButOutdatedSystemFiles() {
+        assertFalse(RootFSInstaller.isRootFSReady(true, RootFSInstaller.LATEST_VERSION - 1));
+    }
+
+    @Test
+    public void acceptsCurrentSystemFilesOnlyWhenRootIsValid() {
+        assertTrue(RootFSInstaller.isRootFSReady(true, RootFSInstaller.LATEST_VERSION));
+        assertFalse(RootFSInstaller.isRootFSReady(false, RootFSInstaller.LATEST_VERSION));
+    }
+
 }
