@@ -122,7 +122,8 @@ public class WineInstallerTest {
     @Test
     public void rejectsUnsafeManifestDeclaredWineExecutablePath() throws IOException {
         File root = temporaryFolder.getRoot();
-        File expected = createAarch64Elf(new File(root, "usr/bin/custom-wine"));
+        createAarch64Elf(new File(root, "usr/bin/custom-wine"));
+        File legacyWine = createAarch64Elf(new File(root, "bin/wine"));
         File wineLibraries = new File(root, "lib/wine");
         assertTrue(new File(wineLibraries, "i386-windows").mkdirs());
         assertTrue(new File(wineLibraries, "x86_64-windows").mkdirs());
@@ -132,6 +133,7 @@ public class WineInstallerTest {
         assertTrue(FileUtils.writeString(new File(root, CompatibilityRuntimeManifest.FILE_NAME), manifest));
 
         assertNull(WineInstaller.findWineExecutable(root));
+        assertTrue(legacyWine.isFile());
     }
 
 }
