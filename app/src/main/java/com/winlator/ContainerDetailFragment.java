@@ -273,6 +273,9 @@ public class ContainerDetailFragment extends Fragment {
                     container.setStartupSelection(startupSelection);
                     container.setBox64Preset(box64Preset);
                     container.setDesktopTheme(desktopTheme);
+                    // Saving graphics settings from the editor opts this container
+                    // into manual driver selection rather than launch-time auto fallback.
+                    container.putExtra("autoGpuSettings", "f");
                     if (!container.saveData()) {
                         AppUtils.showToast(context, R.string.unable_to_save_container_settings);
                         return;
@@ -319,6 +322,11 @@ public class ContainerDetailFragment extends Fragment {
                             return;
                         }
                         this.container = container;
+                        container.putExtra("autoGpuSettings", cbAutoGPUSettings.isChecked() ? "t" : "f");
+                        if (!container.saveData()) {
+                            android.util.Log.w("WinMali-Containers",
+                                "Unable to persist the container's automatic GPU setting");
+                        }
                         saveWineRegistryKeys(view);
                         FragmentActivity activity = getActivity();
                         if (activity != null) activity.onBackPressed();
