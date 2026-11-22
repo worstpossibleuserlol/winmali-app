@@ -112,7 +112,9 @@ public class ProcessHelperTest {
     public void resolvesPidForAStartedJvmProcess() throws Exception {
         java.lang.Process process = new ProcessBuilder("/bin/sh", "-c", "exit 0").start();
         try {
-            assertTrue("JVM should expose a positive child PID", process.pid() > 0);
+            java.lang.reflect.Method publicPidMethod = java.lang.Process.class.getMethod("pid");
+            long publicPid = ((Number)publicPidMethod.invoke(process)).longValue();
+            assertTrue("JVM should expose a positive child PID", publicPid > 0);
             java.lang.reflect.Method method = ProcessHelper.class.getDeclaredMethod(
                 "getProcessId", java.lang.Process.class);
             method.setAccessible(true);
