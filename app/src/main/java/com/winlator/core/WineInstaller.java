@@ -208,7 +208,17 @@ public abstract class WineInstaller {
     }
 
     static File findWineExecutable(File root) {
-        if (root == null) return null;
+        if (root == null || !root.isDirectory() || FileUtils.isSymlink(root)) return null;
+
+        File manifestFile = new File(root, CompatibilityRuntimeManifest.FILE_NAME);
+        if (manifestFile.exists() || FileUtils.isSymlink(manifestFile)) {
+            CompatibilityRuntimeManifest manifest = CompatibilityRuntimeManifest.read(root);
+            if (manifest == null || !manifest.validateWineDirectory(root)) return null;
+
+            File wineExecutable = new File(root, manifest.wineExecutable);
+            return CompatibilityRuntimePackage.isAarch64Elf(wineExecutable) ? wineExecutable : null;
+        }
+
         File bin = new File(root, "bin");
         File wine64 = new File(bin, "wine64");
         if (CompatibilityRuntimePackage.isAarch64Elf(wine64)) return wine64;
