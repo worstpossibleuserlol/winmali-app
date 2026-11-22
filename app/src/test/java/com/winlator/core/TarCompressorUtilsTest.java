@@ -61,7 +61,7 @@ public class TarCompressorUtilsTest {
                 String entryName = spec.type == TarArchiveEntry.LF_DIR && !spec.name.endsWith("/")
                     ? spec.name + "/" : spec.name;
                 TarArchiveEntry entry = new TarArchiveEntry(entryName, spec.type, spec.preserveAbsolutePath);
-                if (spec.type == TarArchiveEntry.LF_SYMLINK) {
+                if (spec.type == TarArchiveEntry.LF_SYMLINK || spec.type == TarArchiveEntry.LF_LINK) {
                     entry.setLinkName(spec.linkName);
                 }
                 else if (spec.type != TarArchiveEntry.LF_DIR) {
