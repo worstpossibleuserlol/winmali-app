@@ -183,7 +183,7 @@ public abstract class Box64PresetManager {
             for (String[] preset : presets) {
                 if (preset[0].equals(id)) {
                     preset[1] = name.trim();
-                    preset[2] = envVars != null ? envVars.toString() : "";
+                    preset[2] = envVars != null ? envVars.toEscapedString() : "";
                     updated = true;
                     break;
                 }
@@ -194,7 +194,7 @@ public abstract class Box64PresetManager {
             int nextId = getNextPresetId(context);
             if (nextId <= 0) return;
             presets.add(new String[]{Box64Preset.CUSTOM+"-"+nextId,
-                name.trim(), envVars != null ? envVars.toString() : ""});
+                name.trim(), envVars != null ? envVars.toEscapedString() : ""});
         }
 
         ArrayList<String> encodedPresets = new ArrayList<>();
