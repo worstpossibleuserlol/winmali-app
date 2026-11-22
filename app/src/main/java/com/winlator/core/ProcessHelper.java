@@ -125,37 +125,18 @@ public abstract class ProcessHelper {
     }
 
     private static int getProcessId(java.lang.Process process) {
-        // Android's java.lang.Process does not expose Process.pid() on every
-        // supported API level. Try the public method when present, then use the
-        // ProcessBuilder implementation's PID field as a compatibility fallback.
+        if (process == null) return -1;
         try {
-            // Process.pid() is public on Android API 26+ and avoids reflective
-            // access to hidden fields on java.lang.Process implementation classes.
+            // WinMali's minSdk is 29, where Process.pid() is available. Using
+            // reflective access to ProcessImpl's private fields fails on newer
+            // JVMs and can prevent a successfully started process being tracked.
             long pid = process.pid();
-            if (pid > 0 && pid <= Integer.MAX_VALUE) return (int)pid;
+            return pid > 0 && pid <= Integer.MAX_VALUE ? (int)pid : -1;
         }
-        catch (UnsupportedOperationException | SecurityException ignored) {}
-
-        Class<?> processClass = process.getClass();
-        while (processClass != null) {
-            try {
-                Field pidField = processClass.getDeclaredField("pid");
-                pidField.setAccessible(true);
-                Object value = pidField.get(process);
-                if (value instanceof Number) {
-                    long pid = ((Number)value).longValue();
-                    if (pid > 0 && pid <= Integer.MAX_VALUE) return (int)pid;
-                }
-                return -1;
-            }
-            catch (NoSuchFieldException error) {
-                processClass = processClass.getSuperclass();
-            }
-            catch (ReflectiveOperationException | RuntimeException error) {
-                return -1;
-            }
+        catch (RuntimeException error) {
+            android.util.Log.w("WinMali-Process", "Unable to retrieve child process ID", error);
+            return -1;
         }
-        return -1;
     }
 
     private static boolean hasDebugCallbacks() {
