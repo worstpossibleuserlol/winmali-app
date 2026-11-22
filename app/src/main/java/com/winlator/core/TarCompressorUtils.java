@@ -32,6 +32,8 @@ import java.nio.file.StandardCopyOption;
 import java.util.concurrent.atomic.AtomicLong;
 
 public abstract class TarCompressorUtils {
+    private static final int MAX_METADATA_READ_BYTES = 16 * 1024 * 1024;
+
     public enum Type {XZ, ZSTD, GZIP}
 
     public interface OnExtractFileListener {
@@ -318,6 +320,7 @@ public abstract class TarCompressorUtils {
     }
 
     public static byte[] read(Type type, File source, String localPath) {
+        if (type == null || source == null || !source.isFile() || localPath == null) return null;
         boolean pathIsPrefix = false;
         boolean pathIsSuffix = false;
 
@@ -340,15 +343,19 @@ public abstract class TarCompressorUtils {
                 boolean match = pathIsSuffix ? entryName.endsWith(localPath) : (pathIsPrefix ? entryName.startsWith(localPath) : entryName.equals(localPath));
 
                 if (match && !entry.isDirectory() && !entry.isSymbolicLink()) {
-                    try (BufferedOutputStream outStream = new BufferedOutputStream(dataOutputStream, StreamUtils.BUFFER_SIZE)) {
-                        if (!StreamUtils.copy(tar, outStream)) return null;
+                    if (entry.getSize() > MAX_METADATA_READ_BYTES) return null;
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    while ((bytesRead = tar.read(buffer)) != -1) {
+                        if (dataOutputStream.size() + bytesRead > MAX_METADATA_READ_BYTES) return null;
+                        dataOutputStream.write(buffer, 0, bytesRead);
                     }
                     return dataOutputStream.toByteArray();
                 }
             }
             return null;
         }
-        catch (IOException e) {
+        catch (IOException | RuntimeException e) {
             return null;
         }
     }
