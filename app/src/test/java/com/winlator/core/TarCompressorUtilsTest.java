@@ -261,6 +261,19 @@ public class TarCompressorUtilsTest {
     }
 
     @Test
+    public void rejectsDirectoryEntryThatResolvesThroughExistingSymlink() throws IOException {
+        File destination = new File(temporaryFolder.getRoot(), "rootfs-directory-link");
+        File actualDirectory = new File(destination, "actual");
+        assertTrue(actualDirectory.mkdirs());
+        File alias = new File(destination, "alias");
+        Files.createSymbolicLink(alias.toPath(), java.nio.file.Paths.get("actual"));
+        File archive = createArchive(EntrySpec.directory("alias"));
+
+        assertFalse(TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, archive, destination));
+        assertTrue(Files.isSymbolicLink(alias.toPath()));
+    }
+
+    @Test
     public void refusesToWriteThroughExistingSymlinkParent() throws IOException {
         File destination = new File(temporaryFolder.getRoot(), "rootfs");
         File inside = new File(destination, "inside");
