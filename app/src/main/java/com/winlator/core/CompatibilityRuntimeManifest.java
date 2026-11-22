@@ -66,7 +66,7 @@ public final class CompatibilityRuntimeManifest {
     }
 
     public static boolean isEngineLaunchable(Engine engine) {
-        return isEngineLaunchable(engine);
+        return engine == Engine.WINE;
     }
 
     public static CompatibilityRuntimeManifest read(File runtimeRoot) {
@@ -102,7 +102,7 @@ public final class CompatibilityRuntimeManifest {
             String wineLibraryRoot = CompatibilityRuntimePackage.normalizeRelativePath(
                 json.optString("wineLibraryRoot", ""));
 
-            if ( !CompatibilityRuntimePackage.isValidVersionName(version) ||
+            if (!CompatibilityRuntimePackage.isValidVersionName(version) ||
                 !isSupportedHostAbi(hostAbi) || entrypoint == null ||
                 wineExecutable == null || wineLibraryRoot == null) return null;
 
@@ -177,7 +177,7 @@ public final class CompatibilityRuntimeManifest {
     public boolean isLaunchableByCurrentWinMali() {
         // The current session launcher integrates Wine directly. Proton needs
         // a dedicated Android Proton launcher/runtime adapter before execution.
-        return engine == Engine.WINE;
+        return isEngineLaunchable(engine);
     }
 
     private static String getGuestDirectoryName(String guest) {
