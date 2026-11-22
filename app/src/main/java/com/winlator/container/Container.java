@@ -241,7 +241,8 @@ public class Container {
     }
 
     public void setWineVersion(String wineVersion) {
-        this.wineVersion = wineVersion;
+        this.wineVersion = wineVersion == null || wineVersion.trim().isEmpty() ?
+            WineInfo.MAIN_WINE_INFO.identifier() : wineVersion.trim();
     }
 
     public File getConfigFile() {
@@ -311,9 +312,15 @@ public class Container {
     }
 
     public boolean saveData() {
-        if (rootDir == null || !rootDir.isDirectory()) return false;
+        if (rootDir == null || FileUtils.isSymlink(rootDir) || !rootDir.isDirectory()) return false;
         File destination = getConfigFile();
-        File temporary = new File(rootDir, ".container.tmp");
+        File temporary;
+        try {
+            temporary = File.createTempFile(".container-", ".tmp", rootDir);
+        }
+        catch (IOException error) {
+            return false;
+        }
         try {
             JSONObject data = new JSONObject();
             data.put("id", id);
@@ -358,6 +365,7 @@ public class Container {
     }
 
     public void loadData(JSONObject data) throws JSONException {
+        if (data == null) throw new JSONException("Container configuration is null");
         wineVersion = WineInfo.MAIN_WINE_INFO.identifier();
         dxwrapperConfig = "";
         graphicsDriverConfig = "";
@@ -439,7 +447,13 @@ public class Container {
         try {
             if (data.has("extraData")) {
                 JSONObject extraData = data.getJSONObject("extraData");
-                int appVersion = Integer.parseInt(extraData.optString("appVersion", "0"));
+                int appVersion = 0;
+                try {
+                    appVersion = Integer.parseInt(extraData.optString("appVersion", "0"));
+                }
+                catch (NumberFormatException ignored) {
+                    // Damaged metadata is treated as an old container and migrated conservatively.
+                }
 
                 if (appVersion < 16 && data.has("envVars")) {
                     EnvVars defaultEnvVars = new EnvVars(DEFAULT_ENV_VARS);
@@ -450,23 +464,20 @@ public class Container {
             }
 
             KeyValueSet wincomponents1 = new KeyValueSet(DEFAULT_WINCOMPONENTS);
-            KeyValueSet wincomponents2 = new KeyValueSet(data.getString("wincomponents"));
-            String result = "";
-
-            for (String[] wincomponent1 : wincomponents1) {
-                String value = wincomponent1[1];
-
-                for (String[] wincomponent2 : wincomponents2) {
-                    if (wincomponent1[0].equals(wincomponent2[0])) {
-                        value = wincomponent2[1];
-                        break;
-                    }
-                }
-
-                result += (!result.isEmpty() ? "," : "")+wincomponent1[0]+"="+value;
+            KeyValueSet wincomponents2 = new KeyValueSet(data.optString("wincomponents", DEFAULT_WINCOMPONENTS));
+            java.util.HashMap<String, String> savedComponents = new java.util.HashMap<>();
+            for (String[] component : wincomponents2) {
+                if (component.length >= 2) savedComponents.put(component[0], component[1]);
             }
 
-            data.put("wincomponents", result);
+            StringBuilder result = new StringBuilder();
+            for (String[] component : wincomponents1) {
+                if (component.length < 2) continue;
+                if (result.length() > 0) result.append(',');
+                result.append(component[0]).append('=')
+                    .append(savedComponents.getOrDefault(component[0], component[1]));
+            }
+            data.put("wincomponents", result.toString());
         }
         catch (JSONException e) {}
     }

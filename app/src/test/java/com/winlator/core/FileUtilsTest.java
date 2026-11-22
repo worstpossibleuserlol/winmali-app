@@ -17,6 +17,37 @@ public class FileUtilsTest {
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
 
     @Test
+    public void copyingAFileOntoItselfDoesNotTruncateIt() throws IOException {
+        File file = new File(temporaryFolder.getRoot(), "same-file.txt");
+        Files.write(file.toPath(), "preserve-me".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        assertTrue(FileUtils.copy(file, file));
+        assertEquals("preserve-me", FileUtils.readString(file));
+    }
+
+    @Test
+    public void copyReplacesDestinationSymlinkWithoutTouchingItsTarget() throws IOException {
+        File source = new File(temporaryFolder.getRoot(), "source.txt");
+        File target = new File(temporaryFolder.getRoot(), "external.txt");
+        File link = new File(temporaryFolder.getRoot(), "destination-link");
+        Files.write(source.toPath(), "new-data".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.write(target.toPath(), "keep-data".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.createSymbolicLink(link.toPath(), target.toPath());
+
+        assertTrue(FileUtils.copy(source, link));
+        assertFalse(Files.isSymbolicLink(link.toPath()));
+        assertEquals("new-data", FileUtils.readString(link));
+        assertEquals("keep-data", FileUtils.readString(target));
+    }
+
+    @Test
+    public void basenameKeepsDotfilesAndStripsOnlyTheLastExtension() {
+        assertEquals(".bashrc", FileUtils.getBasename(".bashrc"));
+        assertEquals("game", FileUtils.getBasename("game.exe"));
+        assertEquals("archive.tar", FileUtils.getBasename("archive.tar.gz"));
+    }
+
+    @Test
     public void copyPreservesRelativeSymbolicLinks() throws IOException {
         File source = new File(temporaryFolder.getRoot(), "source");
         File destination = new File(temporaryFolder.getRoot(), "destination");

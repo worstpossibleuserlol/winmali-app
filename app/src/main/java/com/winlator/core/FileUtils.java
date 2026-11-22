@@ -35,6 +35,7 @@ import java.util.UUID;
 
 public abstract class FileUtils {
     public static byte[] read(Context context, String assetFile) {
+        if (context == null || assetFile == null) return null;
         try (InputStream inStream = context.getAssets().open(assetFile)) {
             return StreamUtils.copyToByteArray(inStream);
         }
@@ -44,6 +45,7 @@ public abstract class FileUtils {
     }
 
     public static byte[] read(File file) {
+        if (file == null || !file.isFile()) return null;
         try (InputStream inStream = new BufferedInputStream(new FileInputStream(file))) {
             return StreamUtils.copyToByteArray(inStream);
         }
@@ -64,49 +66,49 @@ public abstract class FileUtils {
 
     public static String readString(Context context, Uri uri) {
         if (context == null || uri == null) return null;
-        StringBuilder sb = new StringBuilder();
-        try (InputStream inputStream = context.getContentResolver().openInputStream(uri)) {
-            if (inputStream == null) return null;
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
-                String line;
-                boolean firstLine = true;
-                while ((line = reader.readLine()) != null) {
-                    if (!firstLine) sb.append('\n');
-                    sb.append(line);
-                    firstLine = false;
-                }
-                return sb.toString();
-            }
+        try (InputStream input = context.getContentResolver().openInputStream(uri)) {
+            if (input == null) return null;
+            // Preserve final newlines and CRLF rather than reconstructing text line-by-line.
+            return new String(StreamUtils.copyToByteArray(input), StandardCharsets.UTF_8);
         }
-        catch (IOException | SecurityException e) {
+        catch (IOException | SecurityException error) {
             return null;
         }
     }
 
     public static boolean write(File file, byte[] data) {
-        try (OutputStream os = new FileOutputStream(file)) {
-            os.write(data, 0, data.length);
+        if (file == null || data == null || isSymlink(file)) return false;
+        File parent = file.getAbsoluteFile().getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) return false;
+        try (OutputStream output = new FileOutputStream(file)) {
+            output.write(data);
+            output.flush();
             return true;
         }
-        catch (IOException e) {
-            e.printStackTrace();
+        catch (IOException | RuntimeException error) {
+            android.util.Log.w("WinMali-FileUtils", "Unable to write file: "+file, error);
+            return false;
         }
-        return false;
     }
 
     public static boolean writeString(File file, String data) {
-        try (BufferedWriter bw = new BufferedWriter(new FileWriter(file))) {
-            bw.write(data);
-            bw.flush();
+        if (file == null || data == null || isSymlink(file)) return false;
+        File parent = file.getAbsoluteFile().getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) return false;
+        try (BufferedWriter writer = new BufferedWriter(
+                new java.io.OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8))) {
+            writer.write(data);
+            writer.flush();
             return true;
         }
-        catch (IOException e) {
-            e.printStackTrace();
+        catch (IOException | RuntimeException error) {
+            android.util.Log.w("WinMali-FileUtils", "Unable to write text file: "+file, error);
+            return false;
         }
-        return false;
     }
 
     public static boolean symlink(File linkTarget, File linkFile) {
+        if (linkTarget == null || linkFile == null) return false;
         return symlink(linkTarget.getAbsolutePath(), linkFile.getAbsolutePath());
     }
 
@@ -114,7 +116,7 @@ public abstract class FileUtils {
         if (linkTarget == null || linkFile == null || linkTarget.isEmpty() || linkFile.isEmpty()) return false;
         File destination = new File(linkFile).getAbsoluteFile();
         File parent = destination.getParentFile();
-        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) return false;
+        if (parent == null || (!parent.isDirectory() && !parent.mkdirs())) return false;
 
         File temporary = new File(parent, destination.getName()+".link-"+UUID.randomUUID());
         try {
@@ -138,7 +140,7 @@ public abstract class FileUtils {
     }
 
     public static boolean isSymlink(File file) {
-        return Files.isSymbolicLink(file.toPath());
+        return file != null && Files.isSymbolicLink(file.toPath());
     }
 
     public static boolean delete(File targetFile) {
@@ -186,11 +188,23 @@ public abstract class FileUtils {
         if (srcFile == null || dstFile == null) return false;
         if (isSymlink(srcFile)) {
             String linkTarget = readSymlink(srcFile);
-            if (linkTarget.isEmpty()) return false;
+            if (linkTarget == null || linkTarget.isEmpty()) return false;
             File parent = dstFile.getParentFile();
             if (parent != null && !parent.isDirectory() && !parent.mkdirs()) return false;
             return symlink(linkTarget, dstFile.getPath());
         }
+
+        try {
+            // FileOutputStream truncates a file before a self-copy can read it.
+            if (srcFile.getCanonicalFile().equals(dstFile.getCanonicalFile())) return srcFile.exists();
+        }
+        catch (IOException error) {
+            return false;
+        }
+
+        // Replace a destination link itself, never write through to its target.
+        if (isSymlink(dstFile) && !delete(dstFile)) return false;
+
         if (srcFile.isDirectory()) {
             if (isAscendantOf(srcFile, dstFile) || (!dstFile.isDirectory() && !dstFile.mkdirs())) return false;
             if (callback != null) callback.call(dstFile);
@@ -260,8 +274,9 @@ public abstract class FileUtils {
 
     public static ArrayList<String> readLines(File file, boolean skipEmptyLines) {
         ArrayList<String> lines = new ArrayList<>();
+        if (file == null || !file.isFile()) return lines;
         try (FileInputStream fis = new FileInputStream(file)) {
-            BufferedReader reader = new BufferedReader(new InputStreamReader(fis));
+            BufferedReader reader = new BufferedReader(new InputStreamReader(fis, StandardCharsets.UTF_8));
             String line;
             while ((line = reader.readLine()) != null) {
                 if (skipEmptyLines) {
@@ -285,7 +300,9 @@ public abstract class FileUtils {
     }
 
     public static String getBasename(String path) {
-        return getName(path).replaceFirst("\\.[^\\.]+$", "");
+        String name = getName(path);
+        int extensionDot = name.lastIndexOf('.');
+        return extensionDot <= 0 ? name : name.substring(0, extensionDot);
     }
 
     public static String getDirname(String path) {
@@ -340,7 +357,10 @@ public abstract class FileUtils {
         boolean originLink = isSymlink(origin);
         boolean targetLink = isSymlink(target);
         if (originLink || targetLink) {
-            return originLink && targetLink && readSymlink(origin).equals(readSymlink(target));
+            if (!originLink || !targetLink) return false;
+            String originTarget = readSymlink(origin);
+            String targetTarget = readSymlink(target);
+            return originTarget != null && originTarget.equals(targetTarget);
         }
         if (origin.isDirectory() && target.isDirectory()) {
             File[] originFiles = origin.listFiles();
