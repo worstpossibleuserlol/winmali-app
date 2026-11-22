@@ -241,7 +241,7 @@ public class TarCompressorUtilsTest {
     }
 
     @Test
-    public void rejectsHardLinkEntries() throws IOException {
+    public void rejectsHardLinksWithMissingTargets() throws IOException {
         File archive = createArchive(new EntrySpec("hard-link", TarArchiveEntry.LF_LINK,
             "target", new byte[0], false));
         File destination = new File(temporaryFolder.getRoot(), "hard-link-extract");
