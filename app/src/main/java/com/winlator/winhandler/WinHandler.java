@@ -455,6 +455,16 @@ public class WinHandler {
         }
     }
 
+    private static void logSocketError(String message, Throwable error) {
+        try {
+            android.util.Log.e("WinMali-WinHandler", message, error);
+        }
+        catch (RuntimeException ignored) {
+            // Android's Log facade is not implemented in the plain JVM unit-test
+            // runtime. Logging must not turn a handled socket failure into a crash.
+        }
+    }
+
     /**
      * Binds the guest-control socket before returning. The guest's winhandler.exe
      * sends its INIT datagram as soon as Wine starts, so an asynchronous bind here
@@ -488,8 +498,7 @@ public class WinHandler {
             initReceived = false;
             socket = null;
             if (newSocket != null) newSocket.close();
-            android.util.Log.e("WinMali-WinHandler",
-                "Unable to bind guest-control UDP port "+SERVER_PORT, error);
+            logSocketError("Unable to bind guest-control UDP port "+SERVER_PORT, error);
             return false;
         }
     }
@@ -515,15 +524,13 @@ public class WinHandler {
             }
             catch (SocketException error) {
                 if (running) {
-                    android.util.Log.e("WinMali-WinHandler",
-                        "Guest-control socket stopped unexpectedly", error);
+                    logSocketError("Guest-control socket stopped unexpectedly", error);
                 }
                 break;
             }
             catch (IOException | RuntimeException error) {
                 if (running) {
-                    android.util.Log.e("WinMali-WinHandler",
-                        "Unable to process guest-control datagram", error);
+                    logSocketError("Unable to process guest-control datagram", error);
                 }
                 receiveData.clear();
             }
