@@ -59,6 +59,13 @@ public class ProcessHelperTest {
     }
 
     @Test
+    public void affinityHexMaskPreservesCpuIndicesAboveThirtyOne() {
+        assertEquals("180000000", ProcessHelper.getAffinityMaskAsHexString("31,32"));
+        assertEquals("8000000000000000", ProcessHelper.getAffinityMaskAsHexString("63"));
+        assertEquals(0, ProcessHelper.getAffinityMaskAsLong("bad,-1,64"));
+    }
+
+    @Test
     public void collectsOnlyActualDescendantsNotUnrelatedHigherPids() {
         ProcessHelper.PStat unrelated = process(900, 1);
         ProcessHelper.PStat child = process(120, 100);

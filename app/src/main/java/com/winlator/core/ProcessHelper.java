@@ -49,15 +49,15 @@ public abstract class ProcessHelper {
     }
 
     public static void suspendProcess(int pid) {
-        Process.sendSignal(pid, OsConstants.SIGSTOP);
+        if (pid > 0) Process.sendSignal(pid, OsConstants.SIGSTOP);
     }
 
     public static void resumeProcess(int pid) {
-        Process.sendSignal(pid, OsConstants.SIGCONT);
+        if (pid > 0) Process.sendSignal(pid, OsConstants.SIGCONT);
     }
 
     public static void killProcess(int pid) {
-        Process.sendSignal(pid, OsConstants.SIGKILL);
+        if (pid > 0) Process.sendSignal(pid, OsConstants.SIGKILL);
     }
 
     public static int exec(String command) {
@@ -302,8 +302,21 @@ public abstract class ProcessHelper {
         return affinityMask;
     }
 
+    public static long getAffinityMaskAsLong(String cpuList) {
+        if (cpuList == null || cpuList.trim().isEmpty()) return 0L;
+        long affinityMask = 0L;
+        for (String value : cpuList.split(",")) {
+            try {
+                int index = Integer.parseInt(value.trim());
+                if (index >= 0 && index < Long.SIZE) affinityMask |= (1L << index);
+            }
+            catch (NumberFormatException ignored) {}
+        }
+        return affinityMask;
+    }
+
     public static String getAffinityMaskAsHexString(String cpuList) {
-        return Integer.toHexString(getAffinityMaskAsInt(cpuList));
+        return Long.toHexString(getAffinityMaskAsLong(cpuList));
     }
 
     public static int getAffinityMask(String cpuList) {
