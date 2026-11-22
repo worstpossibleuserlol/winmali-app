@@ -594,7 +594,7 @@ public class ContainerManager {
         File activeLink = new File(homeDir, RootFS.USER);
         if (!FileUtils.isSymlink(activeLink)) return;
         String linkTarget = FileUtils.readSymlink(activeLink);
-        if (linkTarget.isEmpty()) return;
+        if (linkTarget == null || linkTarget.isEmpty()) return;
         File target = new File(linkTarget);
         if (!target.isAbsolute()) target = new File(homeDir, linkTarget);
 

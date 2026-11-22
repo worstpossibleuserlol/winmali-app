@@ -515,10 +515,11 @@ public abstract class FileUtils {
     }
 
     public static String readSymlink(File file) {
+        if (file == null || !isSymlink(file)) return "";
         try {
             return Files.readSymbolicLink(file.toPath()).toString();
         }
-        catch (IOException e) {
+        catch (IOException | SecurityException error) {
             return "";
         }
     }
