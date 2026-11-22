@@ -523,7 +523,22 @@ public class ContainerManager {
     }
 
     private boolean isActiveContainer(Container container) {
-        return container != null && ACTIVE_CONTAINER_IDS.contains(container.id);
+        if (container == null || container.getRootDir() == null) return false;
+        if (ACTIVE_CONTAINER_IDS.contains(container.id)) return true;
+
+        File activeLink = new File(homeDir, RootFS.USER);
+        if (!FileUtils.isSymlink(activeLink)) return false;
+        String linkTarget = FileUtils.readSymlink(activeLink);
+        if (linkTarget == null || linkTarget.isEmpty()) return false;
+
+        File target = new File(linkTarget);
+        if (!target.isAbsolute()) target = new File(homeDir, linkTarget);
+        try {
+            return target.getCanonicalFile().equals(container.getRootDir().getCanonicalFile());
+        }
+        catch (IOException error) {
+            return false;
+        }
     }
 
     public ArrayList<Shortcut> loadShortcuts(Shortcut selectedFolder) {
