@@ -108,10 +108,11 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
     @Override
     public void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == MainActivity.OPEN_FILE_REQUEST_CODE && resultCode == Activity.RESULT_OK) {
-            if (openFileCallback != null) {
-                openFileCallback.call(data.getData());
-                openFileCallback = null;
+        if (requestCode == MainActivity.OPEN_FILE_REQUEST_CODE) {
+            Callback<Uri> callback = openFileCallback;
+            openFileCallback = null;
+            if (resultCode == Activity.RESULT_OK && data != null && data.getData() != null && callback != null) {
+                callback.call(data.getData());
             }
         }
     }
