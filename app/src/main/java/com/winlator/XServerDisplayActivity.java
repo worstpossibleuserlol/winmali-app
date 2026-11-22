@@ -467,7 +467,9 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
 
         boolean wineprefixWasUpdated = WineUtils.isWineprefixWasUpdated(container);
         if (!container.getExtra("appVersion").equals(appVersion) || !container.getExtra("rfsVersion").equals(rfsVersion) || wineprefixWasUpdated) {
-            applyGeneralPatches(container);
+            // Apply patches before updating the marker. If copying fails, the next
+            // launch must retry instead of treating a partially patched prefix as current.
+            if (!applyGeneralPatches(container)) return false;
             container.putExtra("appVersion", appVersion);
             container.putExtra("rfsVersion", rfsVersion);
             containerDataChanged = true;
@@ -512,33 +514,87 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     }
 
     /**
-     * The file-manager binaries are shipped in rootfs_patches.tzst. Older or
-     * partially patched prefixes may have an up-to-date appVersion marker but
-     * still lack these files, so validate and repair them on every container
-     * startup before launching winhandler.exe.
+     * The active rootfs path /home/xuser is a symlink to the selected container.
+     * Extracting rootfs_patches directly into the rootfs is therefore rejected by
+     * the archive extractor's symlink-parent protection. Stage the trusted archive
+     * in cache, then overlay its system files into rootfs and its Wine files into
+     * the real per-container directory.
      */
-    private boolean ensureFileManagerInstalled() {
-        File windowsDir = new File(rootFS.getRootDir(),
-            RootFS.WINEPREFIX+"/drive_c/windows");
-        File fileManager = new File(windowsDir, "wfm.exe");
-        File processHandler = new File(windowsDir, "winhandler.exe");
-
-        if (isNonEmptyFile(fileManager) && isNonEmptyFile(processHandler)) return true;
-
-        android.util.Log.w("WinMali-FileManager",
-            "Container file manager files are missing; restoring rootfs patches");
-        boolean extracted = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD,
-            this, "rootfs_patches.tzst", rootFS.getRootDir());
-
-        if (!extracted || !isNonEmptyFile(fileManager) || !isNonEmptyFile(processHandler)) {
-            android.util.Log.e("WinMali-FileManager",
-                "Unable to restore wfm.exe and winhandler.exe from rootfs_patches.tzst");
+    private boolean applyRootfsPatchArchive(Container targetContainer, boolean includeSystemFiles) {
+        if (targetContainer == null) return false;
+        File containerRoot = targetContainer.getRootDir();
+        if (containerRoot == null || !containerRoot.isDirectory() || FileUtils.isSymlink(containerRoot)) {
+            android.util.Log.e("WinMali-FileManager", "Container root directory is unavailable or unsafe");
             return false;
         }
 
-        android.util.Log.i("WinMali-FileManager",
-            "Restored bundled Windows file manager and process handler");
-        return true;
+        File stagingDir = new File(getCacheDir(),
+            "rootfs-patches-"+targetContainer.id+"-"+System.nanoTime());
+        try {
+            if (!TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD,
+                this, "rootfs_patches.tzst", stagingDir)) {
+                android.util.Log.e("WinMali-FileManager", "Unable to stage rootfs_patches.tzst");
+                return false;
+            }
+
+            if (includeSystemFiles) {
+                File stagedOpt = new File(stagingDir, "opt");
+                File stagedUsr = new File(stagingDir, "usr");
+                File targetOpt = new File(rootFS.getRootDir(), "opt");
+                File targetUsr = new File(rootFS.getRootDir(), "usr");
+                if (!copyPatchDirectory(stagedOpt, targetOpt) ||
+                    !copyPatchDirectory(stagedUsr, targetUsr)) {
+                    android.util.Log.e("WinMali-FileManager", "Unable to apply rootfs system patches");
+                    return false;
+                }
+            }
+
+            File stagedWine = new File(stagingDir, "home/"+RootFS.USER+"/.wine");
+            File targetWine = new File(containerRoot, ".wine");
+            if (!copyPatchDirectory(stagedWine, targetWine)) {
+                android.util.Log.e("WinMali-FileManager", "Unable to apply per-container Wine patches");
+                return false;
+            }
+
+            File windowsDir = new File(targetWine, "drive_c/windows");
+            if (!isNonEmptyFile(new File(windowsDir, "wfm.exe")) ||
+                !isNonEmptyFile(new File(windowsDir, "winhandler.exe"))) {
+                android.util.Log.e("WinMali-FileManager", "Required file-manager binaries are missing after patch application");
+                return false;
+            }
+            return true;
+        }
+        catch (RuntimeException error) {
+            android.util.Log.e("WinMali-FileManager", "Unable to apply rootfs patch archive", error);
+            return false;
+        }
+        finally {
+            if (stagingDir.exists()) FileUtils.delete(stagingDir);
+        }
+    }
+
+    private static boolean copyPatchDirectory(File source, File destination) {
+        if (source == null || destination == null || !source.isDirectory() ||
+            FileUtils.isSymlink(source) || FileUtils.isSymlink(destination)) return false;
+        return FileUtils.copy(source, destination,
+            file -> FileUtils.chmod(file, 0771));
+    }
+
+    /**
+     * Existing containers may already carry the current app-version marker but
+     * still lack WFM because an earlier patch extraction stopped at the active
+     * container symlink. Repair the Wine tree in the selected container itself.
+     */
+    private boolean ensureFileManagerInstalled() {
+        File containerRoot = container != null ? container.getRootDir() : null;
+        if (containerRoot == null || !containerRoot.isDirectory() || FileUtils.isSymlink(containerRoot)) return false;
+        File windowsDir = new File(containerRoot, ".wine/drive_c/windows");
+        if (isNonEmptyFile(new File(windowsDir, "wfm.exe")) &&
+            isNonEmptyFile(new File(windowsDir, "winhandler.exe"))) return true;
+
+        android.util.Log.w("WinMali-FileManager",
+            "Container file manager files are missing; restoring per-container Wine patches");
+        return applyRootfsPatchArchive(container, false);
     }
 
     private static boolean isNonEmptyFile(File file) {
@@ -1133,15 +1189,23 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
     }
 
-    private void applyGeneralPatches(Container container) {
+    private boolean applyGeneralPatches(Container container) {
         File rootDir = rootFS.getRootDir();
-        FileUtils.delete(new File(rootDir, "/opt/apps"));
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "rootfs_patches.tzst", rootDir);
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "pulseaudio.tzst", new File(getFilesDir(), "pulseaudio"));
+        FileUtils.delete(new File(rootDir, "opt/apps"));
+        if (!applyRootfsPatchArchive(container, true)) return false;
+
+        // Keep the existing separate PulseAudio payload and extraction location.
+        if (!TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
+            "pulseaudio.tzst", new File(getFilesDir(), "pulseaudio"))) {
+            // Preserve the pre-existing non-fatal PulseAudio fallback behaviour.
+            android.util.Log.w("WinMali-FileManager", "Unable to refresh PulseAudio files");
+        }
+
         WineUtils.applySystemTweaks(this, wineInfo);
         container.putExtra("dxwrapper", null);
         container.putExtra("desktopTheme", null);
         SettingsFragment.resetPreferenceVersions(this);
+        return true;
     }
 
     public void changeFrameRatingVisibility(Window window, boolean visible) {
