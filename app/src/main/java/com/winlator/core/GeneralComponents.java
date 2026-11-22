@@ -34,12 +34,19 @@ import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 
 public abstract class GeneralComponents {
     public enum InstallMode {DOWNLOAD, FILE, BOTH}
     private static final String INSTALLABLE_COMPONENTS_URL = "https://raw.githubusercontent.com/brunodev85/winlator/main/installable_components/%s";
     private static final long MAX_COMPONENT_IMPORT_BYTES = 512L * 1024L * 1024L;
+    private static final ExecutorService IMPORT_OPERATIONS = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "WinMali-component-import");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     public enum Type {
         BOX64, TURNIP, DXVK, VKD3D, WINED3D, SOUNDFONT, ADRENOTOOLS_DRIVER;
@@ -398,83 +405,109 @@ public abstract class GeneralComponents {
 
     private static void openFileForInstall(final MainActivity activity, final Type type, final Spinner spinner, final String defaultItem) {
         activity.setOpenFileCallback((uri) -> {
-            File source = copyUriToCache(activity, uri);
-            if (source == null) {
-                AppUtils.showToast(activity, R.string.unable_to_import_component);
-                return;
-            }
+            final PreloaderDialog preloaderDialog = new PreloaderDialog(activity);
+            preloaderDialog.show(R.string.loading);
 
-            try {
-                switch (type) {
-                    case SOUNDFONT: {
-                        String filename = FileUtils.getName(getUriDisplayName(activity, uri));
-                        if (!filename.toLowerCase(Locale.ENGLISH).endsWith(".sf2")) {
-                            AppUtils.showToast(activity, R.string.unable_to_import_component);
-                            break;
-                        }
-                        File destination = new File(getComponentDir(type, activity), filename);
-                        if (destination.isFile()) FileUtils.delete(destination);
-                        if (FileUtils.copy(source, destination)) loadSpinner(type, spinner, parseDisplayText(type, filename), defaultItem);
-                        else AppUtils.showToast(activity, R.string.unable_to_import_component);
-                        break;
-                    }
-                    case ADRENOTOOLS_DRIVER: {
-                        byte[] manifestData = ZipUtils.read(source, "*.json");
-                        if (manifestData != null) {
-                            JSONObject manifestJSONObject = new JSONObject(new String(manifestData, java.nio.charset.StandardCharsets.UTF_8));
-                            String filename = manifestJSONObject.optString("name", manifestJSONObject.optString("libraryName", ""));
-                            if (filename.isEmpty() || !filename.matches("[A-Za-z0-9._-]+") ||
-                                filename.equals(".") || filename.equals("..")) {
-                                AppUtils.showToast(activity, R.string.unable_to_import_component);
+            IMPORT_OPERATIONS.execute(() -> {
+                File source = copyUriToCache(activity, uri);
+                String importedIdentifier = null;
+                int feedbackMessage = R.string.unable_to_import_component;
+
+                try {
+                    if (source != null) {
+                        switch (type) {
+                            case SOUNDFONT: {
+                                String displayName = getUriDisplayName(activity, uri);
+                                String filename = displayName != null ? FileUtils.getName(displayName) : "";
+                                if (!filename.toLowerCase(Locale.ENGLISH).endsWith(".sf2")) break;
+
+                                File componentDir = getComponentDir(type, activity);
+                                File destination = new File(componentDir, filename);
+                                File staged = new File(componentDir, filename+".import-"+System.nanoTime());
+                                try {
+                                    if (FileUtils.copy(source, staged)) {
+                                        if (!destination.exists() || FileUtils.delete(destination)) {
+                                            if (staged.renameTo(destination)) {
+                                                importedIdentifier = parseDisplayText(type, filename);
+                                                feedbackMessage = R.string.component_imported;
+                                            }
+                                        }
+                                    }
+                                }
+                                finally {
+                                    FileUtils.delete(staged);
+                                }
                                 break;
                             }
-                            File destination = new File(getComponentDir(type, activity), filename);
-                            if (ZipUtils.extract(source, destination)) loadSpinner(type, spinner, filename, defaultItem);
-                            else AppUtils.showToast(activity, R.string.unable_to_import_component);
-                        }
-                        else AppUtils.showToast(activity, R.string.unable_to_import_component);
-                        break;
-                    }
-                    default: {
-                        TarCompressorUtils.Type compressedType = null;
-                        byte[] manifestData = null;
-                        TarCompressorUtils.Type[] supportedTypes = {
-                            TarCompressorUtils.Type.ZSTD, TarCompressorUtils.Type.XZ, TarCompressorUtils.Type.GZIP
-                        };
-                        for (TarCompressorUtils.Type candidate : supportedTypes) {
-                            manifestData = TarCompressorUtils.read(candidate, source, "*.json");
-                            if (manifestData != null) {
-                                compressedType = candidate;
+                            case ADRENOTOOLS_DRIVER: {
+                                byte[] manifestData = ZipUtils.read(source, "*.json");
+                                if (manifestData != null) {
+                                    JSONObject manifestJSONObject = new JSONObject(new String(manifestData,
+                                        java.nio.charset.StandardCharsets.UTF_8));
+                                    String filename = manifestJSONObject.optString("name",
+                                        manifestJSONObject.optString("libraryName", ""));
+                                    if (!filename.isEmpty() && filename.matches("[A-Za-z0-9._-]+") &&
+                                        !filename.equals(".") && !filename.equals("..")) {
+                                        File destination = new File(getComponentDir(type, activity), filename);
+                                        if (ZipUtils.extract(source, destination)) {
+                                            importedIdentifier = filename;
+                                            feedbackMessage = R.string.component_imported;
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+                            default: {
+                                TarCompressorUtils.Type compressedType = null;
+                                byte[] manifestData = null;
+                                TarCompressorUtils.Type[] supportedTypes = {
+                                    TarCompressorUtils.Type.ZSTD, TarCompressorUtils.Type.XZ, TarCompressorUtils.Type.GZIP
+                                };
+                                for (TarCompressorUtils.Type candidate : supportedTypes) {
+                                    manifestData = TarCompressorUtils.read(candidate, source, "*.json");
+                                    if (manifestData != null) {
+                                        compressedType = candidate;
+                                        break;
+                                    }
+                                }
+
+                                if (manifestData != null && compressedType != null) {
+                                    JSONObject manifestJSONObject = new JSONObject(new String(manifestData,
+                                        java.nio.charset.StandardCharsets.UTF_8));
+                                    String contentType = manifestJSONObject.optString("type", "").toUpperCase(Locale.ENGLISH);
+                                    String identifier = StringUtils.parseIdentifier(manifestJSONObject.optString("versionName", ""));
+                                    JSONArray filesJSONArray = manifestJSONObject.optJSONArray("files");
+
+                                    if (contentType.equals(type.name()) &&
+                                        CompatibilityRuntimePackage.isValidVersionName(identifier) &&
+                                        installFromPackagedFile(activity, compressedType, type, source, identifier, filesJSONArray)) {
+                                        importedIdentifier = identifier;
+                                        feedbackMessage = R.string.component_imported;
+                                    }
+                                }
                                 break;
                             }
                         }
-
-                        if (manifestData == null || compressedType == null) {
-                            AppUtils.showToast(activity, R.string.unable_to_import_component);
-                            break;
-                        }
-
-                        JSONObject manifestJSONObject = new JSONObject(new String(manifestData, java.nio.charset.StandardCharsets.UTF_8));
-                        String contentType = manifestJSONObject.optString("type", "").toUpperCase(Locale.ENGLISH);
-                        String identifier = StringUtils.parseIdentifier(manifestJSONObject.optString("versionName", ""));
-                        JSONArray filesJSONArray = manifestJSONObject.optJSONArray("files");
-
-                        if (contentType.equals(type.name()) && CompatibilityRuntimePackage.isValidVersionName(identifier) &&
-                            installFromPackagedFile(activity, compressedType, type, source, identifier, filesJSONArray)) {
-                            loadSpinner(type, spinner, identifier, defaultItem);
-                            AppUtils.showToast(activity, R.string.component_imported);
-                        }
-                        else AppUtils.showToast(activity, R.string.unable_to_import_component);
-                        break;
                     }
                 }
-            }
-            catch (Exception error) {
-                AppUtils.showToast(activity, R.string.unable_to_import_component);
-            }
-            finally {
-                FileUtils.delete(source);
-            }
+                catch (Exception error) {
+                    feedbackMessage = R.string.unable_to_import_component;
+                }
+                finally {
+                    FileUtils.delete(source);
+                }
+
+                final String selectedIdentifier = importedIdentifier;
+                final int resultMessage = feedbackMessage;
+                activity.runOnUiThread(() -> {
+                    preloaderDialog.close();
+                    if (activity.isFinishing() || activity.isDestroyed()) return;
+                    if (selectedIdentifier != null && spinner.getWindowToken() != null) {
+                        loadSpinner(type, spinner, selectedIdentifier, defaultItem);
+                    }
+                    AppUtils.showToast(activity, resultMessage);
+                });
+            });
         });
 
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
