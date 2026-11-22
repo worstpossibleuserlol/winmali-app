@@ -239,6 +239,14 @@ public abstract class WineInstaller {
             return;
         }
 
+        File manifestFile = new File(wineDir, CompatibilityRuntimeManifest.FILE_NAME);
+        final CompatibilityRuntimeManifest runtimeManifest = CompatibilityRuntimeManifest.read(wineDir);
+        if ((manifestFile.exists() || FileUtils.isSymlink(manifestFile)) &&
+            (runtimeManifest == null || !runtimeManifest.validateWineDirectory(wineDir))) {
+            callback.call(null);
+            return;
+        }
+
         RootFS rootFS = RootFS.find(context);
         File rootDir = rootFS.getRootDir();
         String wineBinPath = wineExecutable.getPath();
@@ -276,7 +284,10 @@ public abstract class WineInstaller {
                 FileUtils.symlink(originalTarget, linkFile.getPath());
             }
             else FileUtils.delete(linkFile);
-            callback.call(status == 0 ? wineInfoRef.get() : null);
+            WineInfo detectedInfo = status == 0 ? wineInfoRef.get() : null;
+            if (detectedInfo != null && runtimeManifest != null &&
+                !runtimeManifest.version.equals(detectedInfo.fullVersion())) detectedInfo = null;
+            callback.call(detectedInfo);
         });
         environment.addComponent(launcher);
         environment.startEnvironmentComponents();
@@ -293,6 +304,11 @@ public abstract class WineInstaller {
                 String name = file.getName();
                 if (!name.startsWith("wine-") || !file.isDirectory() || FileUtils.isSymlink(file)) continue;
                 if (findWineExecutable(file) == null) continue;
+                File manifestFile = new File(file, CompatibilityRuntimeManifest.FILE_NAME);
+                if (manifestFile.exists() || FileUtils.isSymlink(manifestFile)) {
+                    CompatibilityRuntimeManifest manifest = CompatibilityRuntimeManifest.read(file);
+                    if (manifest == null || !manifest.validateWineDirectory(file)) continue;
+                }
 
                 WineInfo wineInfo = WineInfo.fromIdentifier(context, name);
                 if (wineInfo != WineInfo.MAIN_WINE_INFO) wineInfos.add(wineInfo);
