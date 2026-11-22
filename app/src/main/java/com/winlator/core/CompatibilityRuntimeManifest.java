@@ -6,6 +6,7 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Set;
@@ -47,6 +48,27 @@ public final class CompatibilityRuntimeManifest {
         this.arm64ecVerified = arm64ecVerified;
     }
 
+    public static boolean isSupportedHostAbi(String hostAbi) {
+        return HOST_ABI_ARM64.equals(hostAbi);
+    }
+
+    public static Set<String> parseGuestArchitectures(String[] values, boolean arm64ecVerified) {
+        if (values == null || values.length == 0) return null;
+        LinkedHashSet<String> guests = new LinkedHashSet<>();
+        for (String value : values) {
+            String guest = value != null ? value.trim().toLowerCase(Locale.ROOT) : "";
+            if (!GUEST_X86.equals(guest) && !GUEST_X86_64.equals(guest) &&
+                !GUEST_ARM64EC.equals(guest)) return null;
+            if (!guests.add(guest)) return null;
+        }
+        if (guests.contains(GUEST_ARM64EC) && !arm64ecVerified) return null;
+        return Collections.unmodifiableSet(guests);
+    }
+
+    public static boolean isEngineLaunchable(Engine engine) {
+        return engine == Engine.WINE;
+    }
+
     public static CompatibilityRuntimeManifest read(File runtimeRoot) {
         if (runtimeRoot == null || !runtimeRoot.isDirectory() || FileUtils.isSymlink(runtimeRoot)) return null;
         File file = new File(runtimeRoot, FILE_NAME);
@@ -81,21 +103,18 @@ public final class CompatibilityRuntimeManifest {
                 json.optString("wineLibraryRoot", ""));
 
             if (!CompatibilityRuntimePackage.isValidVersionName(version) ||
-                !HOST_ABI_ARM64.equals(hostAbi) || entrypoint == null ||
+                !isSupportedHostAbi(hostAbi) || entrypoint == null ||
                 wineExecutable == null || wineLibraryRoot == null) return null;
 
             JSONArray architectures = json.optJSONArray("guestArchitectures");
             if (architectures == null || architectures.length() == 0) return null;
-            LinkedHashSet<String> guests = new LinkedHashSet<>();
-            for (int i = 0; i < architectures.length(); i++) {
-                String guest = architectures.optString(i, "").trim().toLowerCase(Locale.ROOT);
-                if (!GUEST_X86.equals(guest) && !GUEST_X86_64.equals(guest) &&
-                    !GUEST_ARM64EC.equals(guest)) return null;
-                if (!guests.add(guest)) return null;
-            }
-
             boolean arm64ecVerified = json.optBoolean("arm64ecVerified", false);
-            if (guests.contains(GUEST_ARM64EC) && !arm64ecVerified) return null;
+            String[] architectureNames = new String[architectures.length()];
+            for (int i = 0; i < architectures.length(); i++) {
+                architectureNames[i] = architectures.optString(i, "");
+            }
+            Set<String> guests = parseGuestArchitectures(architectureNames, arm64ecVerified);
+            if (guests == null) return null;
 
             if (engine == Engine.WINE && !entrypoint.equals(wineExecutable)) return null;
             return new CompatibilityRuntimeManifest(engine, version, hostAbi, entrypoint,
@@ -158,7 +177,7 @@ public final class CompatibilityRuntimeManifest {
     public boolean isLaunchableByCurrentWinMali() {
         // The current session launcher integrates Wine directly. Proton needs
         // a dedicated Android Proton launcher/runtime adapter before execution.
-        return engine == Engine.WINE;
+        return isEngineLaunchable(engine);
     }
 
     private static String getGuestDirectoryName(String guest) {
