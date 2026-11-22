@@ -273,9 +273,14 @@ public class ContainerDetailFragment extends Fragment {
                     container.setStartupSelection(startupSelection);
                     container.setBox64Preset(box64Preset);
                     container.setDesktopTheme(desktopTheme);
-                    // Saving graphics settings from the editor opts this container
-                    // into manual driver selection rather than launch-time auto fallback.
-                    container.putExtra("autoGpuSettings", "f");
+                    // Only opt out of launch-time automatic GPU fallback when the
+                    // user actually changed a graphics selection or its configuration.
+                    boolean graphicsSettingsChanged =
+                        !selectedGraphicsDriver.equals(graphicsDriver) ||
+                        !oldGraphicsDriverConfig.equals(graphicsDriverConfig) ||
+                        !selectedDXWrapper.equals(dxwrapper) ||
+                        !oldDXWrapperConfig.equals(dxwrapperConfig);
+                    if (graphicsSettingsChanged) container.putExtra("autoGpuSettings", "f");
                     if (!container.saveData()) {
                         AppUtils.showToast(context, R.string.unable_to_save_container_settings);
                         return;
