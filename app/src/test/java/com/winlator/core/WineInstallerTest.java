@@ -115,6 +115,11 @@ public class WineInstallerTest {
             "\"entrypoint\":\"usr/bin/custom-wine\",\"wineExecutable\":\"usr/bin/custom-wine\","+
             "\"wineLibraryRoot\":\"lib/wine\",\"guestArchitectures\":[\"x86\",\"x86_64\"]}";
         assertTrue(FileUtils.writeString(new File(root, CompatibilityRuntimeManifest.FILE_NAME), manifest));
+        CompatibilityRuntimeManifest parsed = CompatibilityRuntimeManifest.read(root);
+        assertNotNull("manifest should parse", parsed);
+        assertTrue("manifest should validate", parsed.validateWineDirectory(root));
+        assertTrue("declared Wine executable should be AArch64 ELF",
+            CompatibilityRuntimePackage.isAarch64Elf(expected));
 
         assertEquals(expected, WineInstaller.findWineExecutable(root));
     }
