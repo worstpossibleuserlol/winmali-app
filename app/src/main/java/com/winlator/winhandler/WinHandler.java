@@ -24,8 +24,9 @@ import java.util.ArrayDeque;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class WinHandler {
-    private static final short SERVER_PORT = 7947;
+    private static final int DEFAULT_SERVER_PORT = 7947;
     private static final short CLIENT_PORT = 7946;
+    private final int serverPort;
     private volatile DatagramSocket socket;
     private Thread receiveThread;
     private Thread sendThread;
@@ -46,7 +47,15 @@ public class WinHandler {
     private Callback<String> requestCallback;
 
     public WinHandler(XServerDisplayActivity activity) {
+        this(activity, DEFAULT_SERVER_PORT);
+    }
+
+    WinHandler(XServerDisplayActivity activity, int serverPort) {
+        if (serverPort < 1 || serverPort > 65535) {
+            throw new IllegalArgumentException("Invalid WinHandler UDP port: "+serverPort);
+        }
         this.activity = activity;
+        this.serverPort = serverPort;
     }
 
     protected boolean sendPacket(int port) {
@@ -480,7 +489,7 @@ public class WinHandler {
             // This is a single-instance control endpoint. Do not allow two
             // WinMali sessions to share the guest-control port.
             newSocket.setReuseAddress(false);
-            newSocket.bind(new InetSocketAddress((InetAddress)null, SERVER_PORT));
+            newSocket.bind(new InetSocketAddress((InetAddress)null, serverPort));
             socket = newSocket;
             initReceived = false;
             running = true;
@@ -498,7 +507,7 @@ public class WinHandler {
             initReceived = false;
             socket = null;
             if (newSocket != null) newSocket.close();
-            logSocketError("Unable to bind guest-control UDP port "+SERVER_PORT, error);
+            logSocketError("Unable to bind guest-control UDP port "+serverPort, error);
             return false;
         }
     }
