@@ -212,7 +212,7 @@ public class InputControlsView extends View {
         this.profile = profile;
         if (profile != null) {
             deselectAllElements();
-            createMouseMoveTimer();
+            if (hasMouseMovement()) createMouseMoveTimer();
         }
         else selectedElement = null;
     }
@@ -294,8 +294,13 @@ public class InputControlsView extends View {
         return (int)Mathf.roundTo(getHeight(), snappingSize);
     }
 
+    private boolean hasMouseMovement() {
+        return mouseMoveOffset.x != 0.0f || mouseMoveOffset.y != 0.0f;
+    }
+
     private synchronized void createMouseMoveTimer() {
-        if (profile == null || xServer == null || mouseMoveTimer != null || !isAttachedToWindow()) return;
+        if (profile == null || xServer == null || !hasMouseMovement() ||
+            mouseMoveTimer != null || !isAttachedToWindow()) return;
         final XServer activeXServer = xServer;
         mouseMoveTimer = new Timer("WinMali-mouse-move", true);
         mouseMoveTimer.schedule(new TimerTask() {
@@ -508,10 +513,12 @@ public class InputControlsView extends View {
             if (binding == Binding.MOUSE_MOVE_LEFT || binding == Binding.MOUSE_MOVE_RIGHT) {
                 mouseMoveOffset.x = isActionDown ? (offset != 0 ? offset : (binding == Binding.MOUSE_MOVE_LEFT ? -1 : 1)) : 0;
                 if (isActionDown) createMouseMoveTimer();
+                else if (!hasMouseMovement()) cancelMouseMoveTimer();
             }
             else if (binding == Binding.MOUSE_MOVE_DOWN || binding == Binding.MOUSE_MOVE_UP) {
                 mouseMoveOffset.y = isActionDown ? (offset != 0 ? offset : (binding == Binding.MOUSE_MOVE_UP ? -1 : 1)) : 0;
                 if (isActionDown) createMouseMoveTimer();
+                else if (!hasMouseMovement()) cancelMouseMoveTimer();
             }
             else if (binding.keycode.isCustomKey()) {
                 if (!isActionDown) handleCommandKeyEvent(binding);
