@@ -107,6 +107,20 @@ jobs:
           grep -Eq '(^|/)opt/wine/lib/wine/x86_64-windows/' "$RUNNER_TEMP/rootfs.list"
           grep -Eq '(^|/)opt/wine/lib/wine/i386-windows/' "$RUNNER_TEMP/rootfs.list"
 
+          # The bundled Wine is x86-64 and is launched through the bundled
+          # AArch64 Box64 runtime. Verify both ELF architectures explicitly.
+          sudo apt-get install -y binutils
+          zstd -q -d -c "$RUNNER_TEMP/rootfs.tzst" | tar -xOf - ./opt/wine/bin/wine > "$RUNNER_TEMP/wine"
+          test -s "$RUNNER_TEMP/wine"
+          readelf -h "$RUNNER_TEMP/wine" | grep -q 'Machine:.*X86-64'
+
+          unzip -p "$APK" assets/box64/box64-0.4.4.tzst > "$RUNNER_TEMP/box64.tzst"
+          test -s "$RUNNER_TEMP/box64.tzst"
+          zstd -q -t "$RUNNER_TEMP/box64.tzst"
+          zstd -q -d -c "$RUNNER_TEMP/box64.tzst" | tar -xOf - ./usr/local/bin/box64 > "$RUNNER_TEMP/box64"
+          test -s "$RUNNER_TEMP/box64"
+          readelf -h "$RUNNER_TEMP/box64" | grep -q 'Machine:.*AArch64'
+
           unzip -p "$APK" assets/container_pattern.tzst > "$RUNNER_TEMP/container_pattern.tzst"
           test -s "$RUNNER_TEMP/container_pattern.tzst"
           PATTERN_MAGIC="$(od -An -tx1 -N4 "$RUNNER_TEMP/container_pattern.tzst" | tr -d ' \\n')"
