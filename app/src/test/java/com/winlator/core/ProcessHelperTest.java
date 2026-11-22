@@ -81,6 +81,18 @@ public class ProcessHelperTest {
     }
 
     @Test
+    public void preservesEmptyProcArgumentsWithoutDiscardingLaterArguments() {
+        assertEquals(java.util.Arrays.asList("wine", "", "--version"),
+            ProcessHelper.parseCommandLine("wine\0\0--version\0"));
+    }
+
+    @Test
+    public void ignoresOnlyTheTrailingProcCommandLineTerminator() {
+        assertEquals(java.util.Arrays.asList("wine", "--version"),
+            ProcessHelper.parseCommandLine("wine\0--version\0"));
+    }
+
+    @Test
     public void rejectsUnterminatedQuotes() {
         assertThrows(IllegalArgumentException.class, () -> ProcessHelper.splitCommand("program \"unfinished"));
     }

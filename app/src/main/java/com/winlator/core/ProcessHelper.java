@@ -180,12 +180,14 @@ public abstract class ProcessHelper {
     }
 
     public static void addDebugCallback(Callback<String> callback) {
+        if (callback == null) return;
         synchronized (debugCallbacks) {
             if (!debugCallbacks.contains(callback)) debugCallbacks.add(callback);
         }
     }
 
     public static void removeDebugCallback(Callback<String> callback) {
+        if (callback == null) return;
         synchronized (debugCallbacks) {
             debugCallbacks.remove(callback);
         }
@@ -315,26 +317,25 @@ public abstract class ProcessHelper {
         }
     }
 
-    public static List<String> getProcessCmdLine(int pid) {
-        try (BufferedReader reader = new BufferedReader(new FileReader("/proc/"+pid+"/cmdline"))) {
-            StringBuilder sb = new StringBuilder();
-            ArrayList<String> result = new ArrayList<>();
-
-            int charsRead;
-            char[] chars = new char[64];
-            while ((charsRead = reader.read(chars)) != -1) {
-                for (int i = 0; i < charsRead; i++) {
-                    if (chars[i] == '\0') {
-                        if (sb.length() == 0) break;
-                        result.add(sb.toString());
-                        sb = new StringBuilder();
-                    }
-                    else sb.append(chars[i]);
-                }
+    static List<String> parseCommandLine(String commandLine) {
+        if (commandLine == null || commandLine.isEmpty()) return Collections.emptyList();
+        ArrayList<String> result = new ArrayList<>();
+        int start = 0;
+        for (int i = 0; i < commandLine.length(); i++) {
+            if (commandLine.charAt(i) == '\0') {
+                result.add(commandLine.substring(start, i));
+                start = i + 1;
             }
-            return result;
         }
-        catch (IOException e) {
+        if (start < commandLine.length()) result.add(commandLine.substring(start));
+        return result;
+    }
+
+    public static List<String> getProcessCmdLine(int pid) {
+        try {
+            return parseCommandLine(FileUtils.readString(new File("/proc/"+pid+"/cmdline")));
+        }
+        catch (RuntimeException error) {
             return Collections.emptyList();
         }
     }

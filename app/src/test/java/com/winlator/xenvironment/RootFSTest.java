@@ -11,6 +11,27 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class RootFSTest {
+    private static byte[] aarch64ElfHeader() {
+        byte[] header = new byte[20];
+        header[0] = 0x7f;
+        header[1] = 'E';
+        header[2] = 'L';
+        header[3] = 'F';
+        header[4] = 2;
+        header[5] = 1;
+        header[18] = (byte)183;
+        return header;
+    }
+
+    private static void prepareWineLibraries(File wine) throws Exception {
+        File x64 = new File(wine, "lib/wine/x86_64-windows");
+        File x86 = new File(wine, "lib/wine/i386-windows");
+        assertTrue(x64.mkdirs());
+        assertTrue(x86.mkdirs());
+        Files.write(new File(x64, "kernel32.dll").toPath(), new byte[]{1});
+        Files.write(new File(x86, "kernel32.dll").toPath(), new byte[]{1});
+    }
+
     @Rule
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
 
@@ -41,9 +62,9 @@ public class RootFSTest {
     public void rejectsEmptyWineExecutable() throws Exception {
         File wine = new File(temporaryFolder.getRoot(), "opt/wine");
         assertTrue(new File(wine, "bin").mkdirs());
-        assertTrue(new File(wine, "lib/wine/x86_64-windows").mkdirs());
-        assertTrue(new File(wine, "lib/wine/i386-windows").mkdirs());
-        assertTrue(new File(wine, "bin/wine").createNewFile());
+        assertTrue(new File(wine, "bin").mkdirs());
+        prepareWineLibraries(wine);
+        Files.write(new File(wine, "bin/wine").toPath(), aarch64ElfHeader());
         assertFalse(RootFS.hasCoreWineFiles(temporaryFolder.getRoot()));
     }
 
@@ -51,8 +72,10 @@ public class RootFSTest {
     public void rejectsMissingArchitectureLibraryDirectory() throws Exception {
         File wine = new File(temporaryFolder.getRoot(), "opt/wine");
         assertTrue(new File(wine, "bin").mkdirs());
+        assertTrue(new File(wine, "bin").mkdirs());
         assertTrue(new File(wine, "lib/wine/x86_64-windows").mkdirs());
-        Files.write(new File(wine, "bin/wine").toPath(), new byte[]{1});
+        assertTrue(new File(wine, "lib/wine/i386-windows").mkdirs());
+        Files.write(new File(wine, "bin/wine").toPath(), aarch64ElfHeader());
         assertFalse(RootFS.hasCoreWineFiles(temporaryFolder.getRoot()));
     }
 
@@ -60,9 +83,8 @@ public class RootFSTest {
     public void acceptsCompleteWineRoot() throws Exception {
         File wine = new File(temporaryFolder.getRoot(), "opt/wine");
         assertTrue(new File(wine, "bin").mkdirs());
-        assertTrue(new File(wine, "lib/wine/x86_64-windows").mkdirs());
-        assertTrue(new File(wine, "lib/wine/i386-windows").mkdirs());
-        Files.write(new File(wine, "bin/wine").toPath(), new byte[]{1, 2, 3});
+        prepareWineLibraries(wine);
+        Files.write(new File(wine, "bin/wine").toPath(), aarch64ElfHeader());
         assertTrue(RootFS.hasCoreWineFiles(temporaryFolder.getRoot()));
     }
 
@@ -70,9 +92,8 @@ public class RootFSTest {
     public void acceptsWine64WhenWineShimIsAbsent() throws Exception {
         File wine = new File(temporaryFolder.getRoot(), "opt/wine");
         assertTrue(new File(wine, "bin").mkdirs());
-        assertTrue(new File(wine, "lib/wine/x86_64-windows").mkdirs());
-        assertTrue(new File(wine, "lib/wine/i386-windows").mkdirs());
-        Files.write(new File(wine, "bin/wine64").toPath(), new byte[]{1, 2, 3});
+        prepareWineLibraries(wine);
+        Files.write(new File(wine, "bin/wine64").toPath(), aarch64ElfHeader());
         assertTrue(RootFS.hasCoreWineFiles(temporaryFolder.getRoot()));
     }
 }
