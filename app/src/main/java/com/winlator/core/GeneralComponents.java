@@ -309,7 +309,7 @@ public abstract class GeneralComponents {
                 if (downloaded && staging.isFile() && staging.length() > 0) {
                     if (destination.exists()) {
                         backupCreated = destination.renameTo(backup);
-                        if (!backupCreated) throw new IOException("Unable to preserve the existing component");
+                        if (!backupCreated) throw new IllegalStateException("Unable to preserve the existing component");
                     }
 
                     installed = staging.renameTo(destination);
