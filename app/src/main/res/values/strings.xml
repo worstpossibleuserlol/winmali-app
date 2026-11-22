@@ -44,6 +44,7 @@
     <string name="updating_system_files">Updating System Files...</string>
     <string name="starting_up">Starting up...</string>
     <string name="unable_to_install_system_files">Unable to install system files</string>
+    <string name="winhandler_start_failed">Unable to start the app-control server. Close other WinMali sessions and try again.</string>
     <string name="keyboard">Keyboard</string>
     <string name="toggle_fullscreen">Toggle Fullscreen</string>
     <string name="exit">Exit</string>
