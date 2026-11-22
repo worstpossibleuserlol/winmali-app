@@ -6,6 +6,8 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.Locale;
+import java.util.ArrayList;
+import java.util.Collections;
 
 public abstract class CPUStatus {
     private static long lastTotalCpuTicks = -1;
@@ -47,22 +49,88 @@ public abstract class CPUStatus {
         }
     }
 
+    private static ArrayList<Integer> getCpuIndices() {
+        ArrayList<Integer> indices = new ArrayList<>();
+        File cpuRoot = new File("/sys/devices/system/cpu");
+        File[] entries = cpuRoot.listFiles((directory, name) -> name.matches("cpu[0-9]+"));
+        if (entries != null) {
+            for (File entry : entries) {
+                try {
+                    indices.add(Integer.parseInt(entry.getName().substring(3)));
+                }
+                catch (NumberFormatException ignored) {}
+            }
+        }
+        Collections.sort(indices);
+        if (indices.isEmpty()) {
+            int count = Math.max(1, Runtime.getRuntime().availableProcessors());
+            for (int i = 0; i < count; i++) indices.add(i);
+        }
+        return indices;
+    }
+
     public static short[] getCurrentClockSpeeds() {
-        int numProcessors = Runtime.getRuntime().availableProcessors();
-        short[] clockSpeeds = new short[numProcessors];
-        for (int i = 0; i < numProcessors; i++) {
-            int currFreq = FileUtils.readInt("/sys/devices/system/cpu/cpu"+i+"/cpufreq/scaling_cur_freq");
-            clockSpeeds[i] = (short)(currFreq / 1000);
+        ArrayList<Integer> indices = getCpuIndices();
+        short[] clockSpeeds = new short[indices.size()];
+        for (int i = 0; i < indices.size(); i++) {
+            int frequency = FileUtils.readInt("/sys/devices/system/cpu/cpu"+indices.get(i)+"/cpufreq/scaling_cur_freq");
+            clockSpeeds[i] = frequency > 0 ? (short)(frequency / 1000) : (short)-1;
         }
         return clockSpeeds;
     }
 
     public static short getMaxClockSpeed(int cpuIndex) {
+        if (cpuIndex < 0) return -1;
         int maxFreq = FileUtils.readInt("/sys/devices/system/cpu/cpu"+cpuIndex+"/cpufreq/cpuinfo_max_freq");
-        return (short)(maxFreq / 1000);
+        return maxFreq > 0 ? (short)(maxFreq / 1000) : (short)-1;
+    }
+
+    static int parseTemperature(String rawValue) {
+        if (rawValue == null) return -1;
+        try {
+            long raw = Long.parseLong(rawValue.trim());
+            if (raw <= 0) return -1;
+            long celsius;
+            if (raw <= 150) celsius = raw;
+            else if (raw <= 1500) celsius = raw / 10;
+            else if (raw <= 150000) celsius = raw / 1000;
+            else return -1;
+            return celsius >= 1 && celsius <= 150 ? (int)celsius : -1;
+        }
+        catch (NumberFormatException error) {
+            return -1;
+        }
+    }
+
+    private static int readTemperature(File file) {
+        if (file == null || !file.isFile()) return -1;
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            return parseTemperature(reader.readLine());
+        }
+        catch (IOException | SecurityException error) {
+            return -1;
+        }
     }
 
     public static int getTemperature() {
+        // Prefer sensors whose kernel label identifies the CPU or the application processor.
+        File thermalRoot = new File("/sys/class/thermal");
+        File[] zones = thermalRoot.listFiles((directory, name) -> name.matches("thermal_zone[0-9]+"));
+        if (zones != null) {
+            for (File zone : zones) {
+                try (BufferedReader reader = new BufferedReader(new FileReader(new File(zone, "type")))) {
+                    String type = reader.readLine();
+                    if (type == null) continue;
+                    String label = type.toLowerCase(Locale.ENGLISH);
+                    if (label.contains("cpu") || label.contains("soc") || label.equals("ap") || label.contains("ap_")) {
+                        int temperature = readTemperature(new File(zone, "temp"));
+                        if (temperature > 0) return temperature;
+                    }
+                }
+                catch (IOException | SecurityException ignored) {}
+            }
+        }
+
         final String[] sensorFiles = {
             "/sys/devices/system/cpu/cpu0/cpufreq/cpu_temp",
             "/sys/devices/system/cpu/cpu0/cpufreq/FakeShmoo_cpu_temp",
@@ -71,15 +139,7 @@ public abstract class CPUStatus {
             "/sys/devices/platform/tegra_tmon/temp1_input",
             "/sys/devices/platform/s5p-tmu/temperature",
             "/sys/devices/platform/s5p-tmu/curr_temp",
-            "/sys/devices/virtual/thermal/thermal_zone10/temp",
-            "/sys/devices/virtual/thermal/thermal_zone1/temp",
-            "/sys/devices/virtual/thermal/thermal_zone0/temp",
-            "/sys/class/thermal/thermal_zone0/temp",
-            "/sys/class/thermal/thermal_zone1/temp",
-            "/sys/class/thermal/thermal_zone3/temp",
-            "/sys/class/thermal/thermal_zone4/temp",
             "/sys/class/hwmon/hwmon0/device/temp1_input",
-            "/sys/class/hwmon/hwmonX/temp1_input",
             "/sys/class/i2c-adapter/i2c-4/4-004c/temperature",
             "/sys/kernel/debug/tegra_thermal/temp_tj",
             "/sys/htc/cpu_temp",
@@ -87,31 +147,15 @@ public abstract class CPUStatus {
             "/sys/devices/platform/tegra-tsensor/tsensor_temperature",
             "/sys/devices/virtual/sec/sec-lp-thermistor/temperature"
         };
-
         for (String path : sensorFiles) {
-            File file = new File(path);
-            if (file.exists()) {
-                try (RandomAccessFile reader = new RandomAccessFile(file , "r")) {
-                    String value = reader.readLine();
-                    int temperature = value != null ? Integer.parseInt(value) : 0;
-                    if (temperature > 100 && temperature <= 1000) {
-                        return (int)(temperature / 10.0f);
-                    }
-                    else if (temperature > 1000 && temperature <= 10000) {
-                        return (int)(temperature / 100.0f);
-                    }
-                    else if (temperature > 10000) {
-                        return (int)(temperature / 1000.0f);
-                    }
-                }
-                catch (IOException | NumberFormatException e) {}
-            }
+            int temperature = readTemperature(new File(path));
+            if (temperature > 0) return temperature;
         }
-
-        return 0;
+        return -1;
     }
 
     public static String formatClockSpeed(int clockSpeed) {
+        if (clockSpeed < 0) return "N/A";
         return clockSpeed >= 1000 ? String.format(Locale.ENGLISH, "%.2f", clockSpeed / 1000.0f)+" GHz" : clockSpeed+" MHz";
     }
 }

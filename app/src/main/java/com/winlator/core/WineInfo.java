@@ -19,27 +19,32 @@ public class WineInfo implements Parcelable {
     public final String version;
     public final String subversion;
     public final String path;
+    private final boolean mainRuntime;
 
     public WineInfo(String version) {
-        this.version = version;
-        this.subversion = null;
-        this.path = null;
+        this(version, null, null, true);
     }
 
     public WineInfo(String version, String subversion, String path) {
+        this(version, subversion, path, false);
+    }
+
+    private WineInfo(String version, String subversion, String path, boolean mainRuntime) {
         this.version = version;
         this.subversion = subversion != null && !subversion.isEmpty() ? subversion : null;
         this.path = path;
+        this.mainRuntime = mainRuntime;
     }
 
     private WineInfo(Parcel in) {
         version = in.readString();
         subversion = in.readString();
         path = in.readString();
+        mainRuntime = in.readInt() != 0;
     }
 
     public String identifier() {
-        return "wine-"+fullVersion()+(this == MAIN_WINE_INFO ? "-custom" : "");
+        return "wine-"+fullVersion()+(mainRuntime ? "-custom" : "");
     }
 
     public String fullVersion() {
@@ -49,7 +54,7 @@ public class WineInfo implements Parcelable {
     @NonNull
     @Override
     public String toString() {
-        return "Wine "+fullVersion()+(this == MAIN_WINE_INFO ? " (Custom)" : "");
+        return "Wine "+fullVersion()+(mainRuntime ? " (Custom)" : "");
     }
 
     @Override
@@ -72,13 +77,14 @@ public class WineInfo implements Parcelable {
         dest.writeString(version);
         dest.writeString(subversion);
         dest.writeString(path);
+        dest.writeInt(mainRuntime ? 1 : 0);
     }
 
     @NonNull
     public static WineInfo fromIdentifier(Context context, String identifier) {
-        if (identifier.equals(MAIN_WINE_INFO.identifier())) return MAIN_WINE_INFO;
+        if (identifier == null || identifier.equals(MAIN_WINE_INFO.identifier())) return MAIN_WINE_INFO;
         Matcher matcher = pattern.matcher(identifier);
-        if (matcher.find()) {
+        if (matcher.matches()) {
             File installedWineDir = RootFS.find(context).getInstalledWineDir();
             String path = (new File(installedWineDir, identifier)).getPath();
             return new WineInfo(matcher.group(1), matcher.group(2), path);

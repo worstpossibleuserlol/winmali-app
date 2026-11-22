@@ -297,94 +297,88 @@ public abstract class RootFSInstaller {
         PreloaderDialog preloaderDialog = new PreloaderDialog(activity);
         preloaderDialog.show(R.string.loading);
         OPERATIONS.execute(() -> {
-            File[] srcFiles, dstFiles;
-            File rootDir = RootFS.find(activity).getRootDir();
-            File wineSystem32Dir = new File(rootDir, "/opt/wine/lib/wine/x86_64-windows");
-            File wineSysWoW64Dir = new File(rootDir, "/opt/wine/lib/wine/i386-windows");
-
             File containerPatternDir = new File(activity.getCacheDir(), "container_pattern");
-            FileUtils.delete(containerPatternDir);
-            boolean patternExtracted = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, activity, "container_pattern.tzst", containerPatternDir);
-            if (!patternExtracted) {
-                FileUtils.delete(containerPatternDir);
-                AppUtils.showToast(activity, R.string.unable_to_install_system_files);
-                preloaderDialog.closeOnUiThread();
-                return;
-            }
-
-            File containerSystem32Dir = new File(containerPatternDir, ".wine/drive_c/windows/system32");
-            File containerSysWoW64Dir = new File(containerPatternDir, ".wine/drive_c/windows/syswow64");
-
-            dstFiles = containerSystem32Dir.listFiles();
-            srcFiles = wineSystem32Dir.listFiles();
-            if (dstFiles == null || srcFiles == null) {
-                FileUtils.delete(containerPatternDir);
-                AppUtils.showToast(activity, R.string.unable_to_install_system_files);
-                preloaderDialog.closeOnUiThread();
-                return;
-            }
-
-            ArrayList<String> system32Files = new ArrayList<>();
-            ArrayList<String> syswow64Files = new ArrayList<>();
-
-            for (File dstFile : dstFiles) {
-                for (File srcFile : srcFiles) {
-                    if (dstFile.getName().equals(srcFile.getName())) {
-                        if (FileUtils.contentEquals(srcFile, dstFile)) system32Files.add(srcFile.getName());
-                        break;
-                    }
-                }
-            }
-
-            dstFiles = containerSysWoW64Dir.listFiles();
-            srcFiles = wineSysWoW64Dir.listFiles();
-            if (dstFiles == null || srcFiles == null) {
-                FileUtils.delete(containerPatternDir);
-                AppUtils.showToast(activity, R.string.unable_to_install_system_files);
-                preloaderDialog.closeOnUiThread();
-                return;
-            }
-
-            for (File dstFile : dstFiles) {
-                for (File srcFile : srcFiles) {
-                    if (dstFile.getName().equals(srcFile.getName())) {
-                        if (FileUtils.contentEquals(srcFile, dstFile)) syswow64Files.add(srcFile.getName());
-                        break;
-                    }
-                }
-            }
-
             try {
-                JSONObject data = new JSONObject();
+                File rootDir = RootFS.find(activity).getRootDir();
+                File wineSystem32Dir = new File(rootDir, "opt/wine/lib/wine/x86_64-windows");
+                File wineSysWoW64Dir = new File(rootDir, "opt/wine/lib/wine/i386-windows");
 
+                FileUtils.delete(containerPatternDir);
+                if (!TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, activity,
+                    "container_pattern.tzst", containerPatternDir)) {
+                    throw new java.io.IOException("Unable to extract container pattern asset");
+                }
+
+                File containerSystem32Dir = new File(containerPatternDir, ".wine/drive_c/windows/system32");
+                File containerSysWoW64Dir = new File(containerPatternDir, ".wine/drive_c/windows/syswow64");
+                File[] dstSystem32 = containerSystem32Dir.listFiles();
+                File[] srcSystem32 = wineSystem32Dir.listFiles();
+                File[] dstSysWoW64 = containerSysWoW64Dir.listFiles();
+                File[] srcSysWoW64 = wineSysWoW64Dir.listFiles();
+                if (dstSystem32 == null || srcSystem32 == null || dstSysWoW64 == null || srcSysWoW64 == null) {
+                    throw new java.io.IOException("Required Wine DLL directories are missing");
+                }
+
+                Set<String> system32Files = new HashSet<>();
+                Set<String> syswow64Files = new HashSet<>();
+                for (File dstFile : dstSystem32) {
+                    for (File srcFile : srcSystem32) {
+                        if (dstFile.getName().equals(srcFile.getName()) &&
+                            FileUtils.contentEquals(srcFile, dstFile)) {
+                            system32Files.add(srcFile.getName());
+                            break;
+                        }
+                    }
+                }
+                for (File dstFile : dstSysWoW64) {
+                    for (File srcFile : srcSysWoW64) {
+                        if (dstFile.getName().equals(srcFile.getName()) &&
+                            FileUtils.contentEquals(srcFile, dstFile)) {
+                            syswow64Files.add(srcFile.getName());
+                            break;
+                        }
+                    }
+                }
+
+                JSONObject data = new JSONObject();
                 JSONArray system32JSONArray = new JSONArray();
                 for (String name : system32Files) {
-                    FileUtils.delete(new File(containerSystem32Dir, name));
+                    if (!FileUtils.delete(new File(containerSystem32Dir, name))) {
+                        throw new java.io.IOException("Unable to remove shared system32 DLL: "+name);
+                    }
                     system32JSONArray.put(name);
                 }
                 data.put("system32", system32JSONArray);
 
                 JSONArray syswow64JSONArray = new JSONArray();
                 for (String name : syswow64Files) {
-                    FileUtils.delete(new File(containerSysWoW64Dir, name));
+                    if (!FileUtils.delete(new File(containerSysWoW64Dir, name))) {
+                        throw new java.io.IOException("Unable to remove shared syswow64 DLL: "+name);
+                    }
                     syswow64JSONArray.put(name);
                 }
                 data.put("syswow64", syswow64JSONArray);
 
-                FileUtils.writeString(new File(activity.getCacheDir(), "common_dlls.json"), data.toString());
+                if (!FileUtils.writeString(new File(activity.getCacheDir(), "common_dlls.json"), data.toString())) {
+                    throw new java.io.IOException("Unable to persist shared DLL metadata");
+                }
 
                 File outputFile = new File(activity.getCacheDir(), "container_pattern.tzst");
                 FileUtils.delete(outputFile);
-                boolean archiveCreated = TarCompressorUtils.compress(TarCompressorUtils.Type.ZSTD,
-                    new File(containerPatternDir, ".wine"), outputFile, 22);
-                if (!archiveCreated) {
-                    AppUtils.showToast(activity, R.string.unable_to_install_system_files);
+                if (!TarCompressorUtils.compress(TarCompressorUtils.Type.ZSTD,
+                    new File(containerPatternDir, ".wine"), outputFile, 22) ||
+                    !outputFile.isFile() || outputFile.length() == 0) {
+                    throw new java.io.IOException("Unable to create compact container pattern");
                 }
-
+            }
+            catch (Exception error) {
+                android.util.Log.e("WinMali-RootFS", "Compact container pattern generation failed", error);
+                AppUtils.showToast(activity, R.string.unable_to_install_system_files);
+            }
+            finally {
                 FileUtils.delete(containerPatternDir);
                 preloaderDialog.closeOnUiThread();
             }
-            catch (JSONException e) {}
         });
     }
 }

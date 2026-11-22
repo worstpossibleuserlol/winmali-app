@@ -20,7 +20,7 @@ public class NetworkHelper {
     private final ConnectivityManager connectivityManager;
 
     public static class IFAddress {
-        public String name = "eth0";
+        public String name = "";
         public int flags = 0;
         public int family = OsConstants.AF_INET;
         public int scopeId = 0;
@@ -35,13 +35,15 @@ public class NetworkHelper {
     }
 
     public NetworkHelper(Context context) {
-        connectivityManager = (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        connectivityManager = context != null ?
+            (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE) : null;
     }
 
     public String getIPv4Address() {
-        if (!isConnected()) return null;
+        if (!isConnected() || connectivityManager == null) return null;
 
         Network activeNetwork = connectivityManager.getActiveNetwork();
+        if (activeNetwork == null) return null;
         LinkProperties linkProperties = connectivityManager.getLinkProperties(activeNetwork);
         if (linkProperties == null) return null;
 
@@ -55,6 +57,7 @@ public class NetworkHelper {
 
     public List<IFAddress> getIFAddresses() {
         ArrayList<IFAddress> result = new ArrayList<>();
+        if (connectivityManager == null) return result;
         Network activeNetwork = connectivityManager.getActiveNetwork();
         if (activeNetwork == null) return result;
 
@@ -67,13 +70,15 @@ public class NetworkHelper {
             if (!(address instanceof Inet4Address || address instanceof Inet6Address)) continue;
 
             IFAddress ifAddress = new IFAddress();
+            String interfaceName = linkProperties.getInterfaceName();
+            if (interfaceName != null && !interfaceName.isEmpty()) ifAddress.name = interfaceName;
             if (address instanceof Inet6Address) {
                 ifAddress.family = OsConstants.AF_INET6;
                 ifAddress.scopeId = ((Inet6Address)address).getScopeId();
             }
 
             ifAddress.address = address.getHostAddress();
-            ifAddress.netmask = formatNetmask(linkAddress.getPrefixLength());
+            ifAddress.netmask = formatNetmask(linkAddress.getPrefixLength(), address instanceof Inet6Address);
             ifAddress.flags =  OsConstants.IFF_UP | OsConstants.IFF_RUNNING;
 
             result.add(ifAddress);
@@ -86,20 +91,27 @@ public class NetworkHelper {
     }
 
     public static String formatNetmask(int prefixLength) {
-        switch (prefixLength) {
-            case 8: return "255.0.0.0";
-            case 16: return "255.255.0.0";
-            case 24: return "255.255.255.0";
-            case 32: return "255.255.255.255";
-            case 64: return "ffff:ffff:ffff:ffff::";
-            default: return "";
+        return formatNetmask(prefixLength, false);
+    }
+
+    public static String formatNetmask(int prefixLength, boolean ipv6) {
+        int bitCount = ipv6 ? 128 : 32;
+        if (prefixLength < 0 || prefixLength > bitCount) return "";
+        byte[] mask = new byte[bitCount / 8];
+        for (int bit = 0; bit < prefixLength; bit++) {
+            mask[bit / 8] |= (byte)(1 << (7 - (bit % 8)));
+        }
+        try {
+            return InetAddress.getByAddress(mask).getHostAddress();
+        }
+        catch (java.net.UnknownHostException error) {
+            return "";
         }
     }
 
     public boolean isConnected() {
+        if (connectivityManager == null) return false;
         NetworkInfo networkInfo = connectivityManager.getActiveNetworkInfo();
-        if (networkInfo == null) return false;
-        int type = networkInfo.getType();
-        return networkInfo.isAvailable() && networkInfo.isConnectedOrConnecting() && (type == ConnectivityManager.TYPE_WIFI || type == ConnectivityManager.TYPE_ETHERNET  || type == ConnectivityManager.TYPE_MOBILE);
+        return networkInfo != null && networkInfo.isAvailable() && networkInfo.isConnected();
     }
 }
