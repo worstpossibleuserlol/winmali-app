@@ -105,7 +105,7 @@ public class WineInstallerTest {
         assertNull(WineInstaller.findWineExecutable(root));
     }
     @Test
-    public void resolvesManifestDeclaredWineExecutableOutsideLegacyBinDirectory() throws IOException {
+    public void resolvesManifestDeclaredWineExecutableOutsideLegacyBinDirectory() throws Exception {
         File root = temporaryFolder.getRoot();
         File expected = createAarch64Elf(new File(root, "usr/bin/custom-wine"));
         File wineLibraries = new File(root, "lib/wine");
