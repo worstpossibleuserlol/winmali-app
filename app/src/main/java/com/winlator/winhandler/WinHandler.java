@@ -51,7 +51,7 @@ public class WinHandler {
     }
 
     WinHandler(XServerDisplayActivity activity, int serverPort) {
-        if (serverPort < 1 || serverPort > 65535) {
+        if (serverPort < 0 || serverPort > 65535) {
             throw new IllegalArgumentException("Invalid WinHandler UDP port: "+serverPort);
         }
         this.activity = activity;
@@ -462,6 +462,11 @@ public class WinHandler {
                 break;
             }
         }
+    }
+
+    int getBoundPort() {
+        DatagramSocket activeSocket = socket;
+        return activeSocket != null && !activeSocket.isClosed() ? activeSocket.getLocalPort() : -1;
     }
 
     private static void logSocketError(String message, Throwable error) {
