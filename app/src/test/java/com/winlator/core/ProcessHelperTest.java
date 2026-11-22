@@ -109,6 +109,22 @@ public class ProcessHelperTest {
         assertThrows(IllegalArgumentException.class, () -> ProcessHelper.splitCommand("program \"unfinished"));
     }
     @Test
+    public void resolvesPidForAStartedJvmProcess() throws Exception {
+        java.lang.Process process = new ProcessBuilder("/bin/sh", "-c", "exit 0").start();
+        try {
+            assertTrue("JVM should expose a positive child PID", process.pid() > 0);
+            java.lang.reflect.Method method = ProcessHelper.class.getDeclaredMethod(
+                "getProcessId", java.lang.Process.class);
+            method.setAccessible(true);
+            int resolvedPid = (Integer)method.invoke(null, process);
+            assertTrue("WinMali should resolve the child PID", resolvedPid > 0);
+        }
+        finally {
+            process.destroyForcibly();
+        }
+    }
+
+    @Test
     public void closesUnusedChildStdinSoWaitingCommandsReceiveEof() throws Exception {
         CountDownLatch finished = new CountDownLatch(1);
         AtomicInteger exitCode = new AtomicInteger(Integer.MIN_VALUE);
