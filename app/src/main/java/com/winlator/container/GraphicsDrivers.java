@@ -62,19 +62,26 @@ public abstract class GraphicsDrivers {
     }
 
     public static String[] parseIdentifiers(String graphicsDriver) {
-        if (graphicsDriver == null || graphicsDriver.isEmpty()) return new String[]{DEFAULT_VULKAN_DRIVER, DEFAULT_OPENGL_DRIVER};
+        if (graphicsDriver == null || graphicsDriver.trim().isEmpty()) {
+            return new String[]{DEFAULT_VULKAN_DRIVER, DEFAULT_OPENGL_DRIVER};
+        }
+
         if (graphicsDriver.contains(",")) {
-            return graphicsDriver.split(",");
+            String[] identifiers = graphicsDriver.split(",", -1);
+            String vulkan = identifiers.length > 0 && isVulkanDriver(identifiers[0].trim()) ?
+                identifiers[0].trim() : DEFAULT_VULKAN_DRIVER;
+            String openGL = identifiers.length > 1 && isOpenGLDriver(identifiers[1].trim()) ?
+                identifiers[1].trim() : DEFAULT_OPENGL_DRIVER;
+            return new String[]{vulkan, openGL};
         }
-        else {
-            if (isVulkanDriver(graphicsDriver)) {
-                return new String[]{graphicsDriver, DEFAULT_OPENGL_DRIVER};
-            }
-            else if (isOpenGLDriver(graphicsDriver)) {
-                return new String[]{DEFAULT_VULKAN_DRIVER, graphicsDriver};
-            }
-            else return new String[]{DEFAULT_VULKAN_DRIVER, DEFAULT_OPENGL_DRIVER};
+
+        if (isVulkanDriver(graphicsDriver)) {
+            return new String[]{graphicsDriver, DEFAULT_OPENGL_DRIVER};
         }
+        else if (isOpenGLDriver(graphicsDriver)) {
+            return new String[]{DEFAULT_VULKAN_DRIVER, graphicsDriver};
+        }
+        else return new String[]{DEFAULT_VULKAN_DRIVER, DEFAULT_OPENGL_DRIVER};
     }
 
     public static KeyValueSet[] parseConfigs(String graphicsDriver, String graphicsDriverConfig) {
