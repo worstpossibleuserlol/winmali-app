@@ -23,7 +23,7 @@ public class WinHandlerTest {
 
             WinHandler handler = new WinHandler(null);
             try {
-                handler.start();
+                assertFalse("start must fail when the UDP port is already occupied", handler.start());
 
                 Field runningField = WinHandler.class.getDeclaredField("running");
                 runningField.setAccessible(true);
@@ -45,7 +45,7 @@ public class WinHandlerTest {
 
         try (DatagramSocket firstSender = new DatagramSocket();
              DatagramSocket secondSender = new DatagramSocket()) {
-            handler.start();
+            assertTrue("WinHandler should bind before start returns", handler.start());
             InetAddress loopback = InetAddress.getByName("127.0.0.1");
             byte[] init = new byte[]{RequestCodes.INIT};
             DatagramPacket initPacket = new DatagramPacket(init, init.length, loopback, 7947);
