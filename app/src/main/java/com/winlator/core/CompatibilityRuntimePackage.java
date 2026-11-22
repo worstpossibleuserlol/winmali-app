@@ -24,6 +24,41 @@ public final class CompatibilityRuntimePackage {
             !version.contains("..") && !version.endsWith(".");
     }
 
+    /**
+     * Compares numeric version segments first, then prerelease/build suffixes.
+     * This keeps tags such as "3.0b" in the correct place instead of treating
+     * them as version zero in the component selector.
+     */
+    public static int compareVersionNames(String first, String second) {
+        if (first == second) return 0;
+        if (first == null) return -1;
+        if (second == null) return 1;
+
+        java.util.regex.Matcher firstMatcher =
+            Pattern.compile("^([0-9]+(?:\\\\.[0-9]+){1,3})(.*)$").matcher(first);
+        java.util.regex.Matcher secondMatcher =
+            Pattern.compile("^([0-9]+(?:\\\\.[0-9]+){1,3})(.*)$").matcher(second);
+        if (!firstMatcher.matches() || !secondMatcher.matches()) {
+            return first.compareToIgnoreCase(second);
+        }
+
+        String[] firstParts = firstMatcher.group(1).split("\\\\.");
+        String[] secondParts = secondMatcher.group(1).split("\\\\.");
+        int count = Math.max(firstParts.length, secondParts.length);
+        for (int i = 0; i < count; i++) {
+            long firstPart = i < firstParts.length ? Long.parseLong(firstParts[i]) : 0L;
+            long secondPart = i < secondParts.length ? Long.parseLong(secondParts[i]) : 0L;
+            int compared = Long.compare(firstPart, secondPart);
+            if (compared != 0) return compared;
+        }
+
+        String firstSuffix = firstMatcher.group(2);
+        String secondSuffix = secondMatcher.group(2);
+        if (firstSuffix.isEmpty() && !secondSuffix.isEmpty()) return 1;
+        if (!firstSuffix.isEmpty() && secondSuffix.isEmpty()) return -1;
+        return firstSuffix.compareToIgnoreCase(secondSuffix);
+    }
+
     public static String normalizeRelativePath(String path) {
         if (path == null || path.isEmpty()) return null;
         String normalized = path.replace('\\', '/');
