@@ -165,8 +165,7 @@ public class WineRegistryEditor implements Closeable {
     }
 
     public Integer getDwordValue(String key, String name, Integer fallback) {
-        String value = getRawValue(key, name);
-        return value != null ? Integer.decode("0x" + value.substring(6)) : fallback;
+        return RegistryValueParser.parseDword(getRawValue(key, name), fallback);
     }
 
     public void setDwordValue(String key, String name, int value) {

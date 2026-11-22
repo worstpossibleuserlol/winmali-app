@@ -92,6 +92,15 @@ public abstract class ProcessHelper {
             }
 
             java.lang.Process process = processBuilder.start();
+            // This launcher has no API for writing to child stdin. Close the
+            // pipe immediately so commands waiting for EOF do not hang forever.
+            try {
+                process.getOutputStream().close();
+            }
+            catch (IOException error) {
+                process.destroyForcibly();
+                throw error;
+            }
             int processId = getProcessId(process);
             if (processId <= 0) {
                 process.destroyForcibly();
@@ -116,11 +125,13 @@ public abstract class ProcessHelper {
     }
 
     private static int getProcessId(java.lang.Process process) {
-        // Android's java.lang.Process does not expose Process.pid() on every
-        // supported API level. Try the public method when present, then use the
-        // ProcessBuilder implementation's PID field as a compatibility fallback.
+        if (process == null) return -1;
+
+        // Resolve pid() from the public java.lang.Process API rather than the
+        // concrete ProcessImpl class. Desktop JVMs expose it here without
+        // module-access errors; older Android runtimes fall through to the PID field.
         try {
-            java.lang.reflect.Method pidMethod = process.getClass().getMethod("pid");
+            java.lang.reflect.Method pidMethod = java.lang.Process.class.getMethod("pid");
             Object value = pidMethod.invoke(process);
             if (value instanceof Number) {
                 long pid = ((Number)value).longValue();

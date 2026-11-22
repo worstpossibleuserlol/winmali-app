@@ -14,8 +14,10 @@ import java.util.Set;
 /**
  * WinMali compatibility-runtime package manifest.
  *
- * Android host executables must be AArch64 ELF. Windows guest architectures
- * are declared separately and checked against the package's Wine library tree.
+ * Packages target the arm64-v8a Android host. Wine itself may be AArch64 or
+ * x86-64; x86-64 Wine is launched through the bundled AArch64 Box64 runtime.
+ * Windows guest architectures are declared separately and checked against
+ * the package's Wine library tree.
  */
 public final class CompatibilityRuntimeManifest {
     public static final String FILE_NAME = "winmali-runtime.json";
@@ -104,23 +106,36 @@ public final class CompatibilityRuntimeManifest {
 
             if (!CompatibilityRuntimePackage.isValidVersionName(version) ||
                 !isSupportedHostAbi(hostAbi) || entrypoint == null ||
-                wineExecutable == null || wineLibraryRoot == null) return null;
+                wineExecutable == null || wineLibraryRoot == null) {
+                android.util.Log.w("WinMali-Runtime", "Manifest rejected: version/host ABI/path validation failed");
+                return null;
+            }
 
             JSONArray architectures = json.optJSONArray("guestArchitectures");
-            if (architectures == null || architectures.length() == 0) return null;
+            if (architectures == null || architectures.length() == 0) {
+                android.util.Log.w("WinMali-Runtime", "Manifest rejected: guestArchitectures is missing or empty");
+                return null;
+            }
             boolean arm64ecVerified = json.optBoolean("arm64ecVerified", false);
             String[] architectureNames = new String[architectures.length()];
             for (int i = 0; i < architectures.length(); i++) {
                 architectureNames[i] = architectures.optString(i, "");
             }
             Set<String> guests = parseGuestArchitectures(architectureNames, arm64ecVerified);
-            if (guests == null) return null;
+            if (guests == null) {
+                android.util.Log.w("WinMali-Runtime", "Manifest rejected: unsupported guest architecture list");
+                return null;
+            }
 
-            if (engine == Engine.WINE && !entrypoint.equals(wineExecutable)) return null;
+            if (engine == Engine.WINE && !entrypoint.equals(wineExecutable)) {
+                android.util.Log.w("WinMali-Runtime", "Manifest rejected: WINE entrypoint must match wineExecutable");
+                return null;
+            }
             return new CompatibilityRuntimeManifest(engine, version, hostAbi, entrypoint,
                 wineExecutable, wineLibraryRoot, guests, arm64ecVerified);
         }
         catch (RuntimeException error) {
+            android.util.Log.w("WinMali-Runtime", "Manifest parser threw an exception", error);
             return null;
         }
     }
@@ -131,7 +146,7 @@ public final class CompatibilityRuntimeManifest {
         File wine = resolveSafeFile(runtimeRoot, wineExecutable);
         File launch = resolveSafeFile(runtimeRoot, entrypoint);
         File libraries = resolveSafeFile(runtimeRoot, wineLibraryRoot);
-        if (!CompatibilityRuntimePackage.isAarch64Elf(wine) || launch == null ||
+        if (!CompatibilityRuntimePackage.isSupportedWineElf(wine) || launch == null ||
             !launch.isFile() || !libraries.isDirectory()) return false;
 
         for (String guest : guestArchitectures) {

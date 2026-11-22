@@ -88,12 +88,12 @@ public class WineInstallerTest {
     }
 
     @Test
-    public void rejectsX8664WineEvenThoughItIsA64BitElf() throws IOException {
+    public void acceptsX8664WineBecauseItIsLaunchedThroughBox64() throws IOException {
         File root = temporaryFolder.getRoot();
         createElf(new File(root, "bin/wine"), 2, 62);
-        createElf(new File(root, "bin/wine64"), 2, 62);
+        File wine64 = createElf(new File(root, "bin/wine64"), 2, 62);
 
-        assertNull(WineInstaller.findWineExecutable(root));
+        assertEquals(wine64, WineInstaller.findWineExecutable(root));
     }
 
     @Test
@@ -104,4 +104,77 @@ public class WineInstallerTest {
 
         assertNull(WineInstaller.findWineExecutable(root));
     }
+    @Test
+    public void resolvesManifestDeclaredWineExecutableOutsideLegacyBinDirectory() throws Exception {
+        File root = temporaryFolder.getRoot();
+        File expected = createAarch64Elf(new File(root, "usr/bin/custom-wine"));
+        File wineLibraries = new File(root, "lib/wine");
+        assertTrue(new File(wineLibraries, "i386-windows").mkdirs());
+        assertTrue(new File(wineLibraries, "x86_64-windows").mkdirs());
+        String manifest = "{\"engine\":\"WINE\",\"version\":\"10.10\",\"hostAbi\":\"arm64-v8a\","+
+            "\"entrypoint\":\"usr/bin/custom-wine\",\"wineExecutable\":\"usr/bin/custom-wine\","+
+            "\"wineLibraryRoot\":\"lib/wine\",\"guestArchitectures\":[\"x86\",\"x86_64\"]}";
+        File manifestFile = new File(root, CompatibilityRuntimeManifest.FILE_NAME);
+        assertTrue(FileUtils.writeString(manifestFile, manifest));
+        assertEquals("manifest file contents should round-trip", manifest, FileUtils.readString(manifestFile));
+        assertTrue("version identifier should be accepted", CompatibilityRuntimePackage.isValidVersionName("10.10"));
+        assertEquals("usr/bin/custom-wine",
+            CompatibilityRuntimePackage.normalizeRelativePath("usr/bin/custom-wine"));
+        org.json.JSONObject manifestJson = new org.json.JSONObject(manifest);
+        assertEquals("WINE", manifestJson.optString("engine", ""));
+        assertEquals("arm64-v8a", manifestJson.optString("hostAbi", ""));
+        assertTrue("host ABI should be accepted",
+            CompatibilityRuntimeManifest.isSupportedHostAbi(manifestJson.optString("hostAbi", "")));
+        assertEquals(2, manifestJson.optJSONArray("guestArchitectures").length());
+        assertTrue("guest architecture list should be accepted",
+            CompatibilityRuntimeManifest.parseGuestArchitectures(new String[]{"x86", "x86_64"}, false) != null);
+        assertEquals("lib/wine",
+            CompatibilityRuntimePackage.normalizeRelativePath(manifestJson.optString("wineLibraryRoot", "")));
+        assertEquals(manifestJson.optString("entrypoint", ""),
+            manifestJson.optString("wineExecutable", ""));
+        assertEquals(CompatibilityRuntimeManifest.Engine.WINE,
+            CompatibilityRuntimeManifest.Engine.valueOf(manifestJson.optString("engine", "")));
+        CompatibilityRuntimeManifest directlyParsed = CompatibilityRuntimeManifest.parse(manifestJson);
+        assertTrue("manifest JSON should parse", directlyParsed != null);
+        CompatibilityRuntimeManifest parsed = CompatibilityRuntimeManifest.read(root);
+        assertTrue("manifest file should be read and parsed", parsed != null);
+        assertTrue("manifest should validate", parsed.validateWineDirectory(root));
+        assertTrue("declared Wine executable should be AArch64 ELF",
+            CompatibilityRuntimePackage.isAarch64Elf(expected));
+
+        assertEquals(expected, WineInstaller.findWineExecutable(root));
+    }
+
+    @Test
+    public void rejectsUnsafeManifestDeclaredWineExecutablePath() throws IOException {
+        File root = temporaryFolder.getRoot();
+        createAarch64Elf(new File(root, "usr/bin/custom-wine"));
+        File legacyWine = createAarch64Elf(new File(root, "bin/wine"));
+        File wineLibraries = new File(root, "lib/wine");
+        assertTrue(new File(wineLibraries, "i386-windows").mkdirs());
+        assertTrue(new File(wineLibraries, "x86_64-windows").mkdirs());
+        String manifest = "{\"engine\":\"WINE\",\"version\":\"10.10\",\"hostAbi\":\"arm64-v8a\","+
+            "\"entrypoint\":\"../custom-wine\",\"wineExecutable\":\"../custom-wine\","+
+            "\"wineLibraryRoot\":\"lib/wine\",\"guestArchitectures\":[\"x86\",\"x86_64\"]}";
+        assertTrue(FileUtils.writeString(new File(root, CompatibilityRuntimeManifest.FILE_NAME), manifest));
+
+        assertNull(WineInstaller.findWineExecutable(root));
+        assertTrue(legacyWine.isFile());
+    }
+
+    @Test
+    public void resolvesManifestDeclaredX8664WineExecutable() throws IOException {
+        File root = temporaryFolder.getRoot();
+        File expected = createElf(new File(root, "usr/bin/custom-wine"), 2, 62);
+        File wineLibraries = new File(root, "lib/wine");
+        assertTrue(new File(wineLibraries, "i386-windows").mkdirs());
+        assertTrue(new File(wineLibraries, "x86_64-windows").mkdirs());
+        String manifest = "{\"engine\":\"WINE\",\"version\":\"10.10\",\"hostAbi\":\"arm64-v8a\","+
+            "\"entrypoint\":\"usr/bin/custom-wine\",\"wineExecutable\":\"usr/bin/custom-wine\","+
+            "\"wineLibraryRoot\":\"lib/wine\",\"guestArchitectures\":[\"x86\",\"x86_64\"]}";
+        assertTrue(FileUtils.writeString(new File(root, CompatibilityRuntimeManifest.FILE_NAME), manifest));
+
+        assertEquals(expected, WineInstaller.findWineExecutable(root));
+    }
+
 }

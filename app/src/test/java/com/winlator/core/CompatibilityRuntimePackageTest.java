@@ -10,6 +10,8 @@ public class CompatibilityRuntimePackageTest {
         assertTrue(CompatibilityRuntimePackage.isValidVersionName("1.2.3.4"));
         assertTrue(CompatibilityRuntimePackage.isValidVersionName("0.4.6-rc1"));
         assertTrue(CompatibilityRuntimePackage.isValidVersionName("0.4.6+vendor1"));
+        // The supported VKD3D repository includes the upstream "3.0b" release tag.
+        assertTrue(CompatibilityRuntimePackage.isValidVersionName("3.0b"));
     }
 
     @Test

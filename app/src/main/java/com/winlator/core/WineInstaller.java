@@ -17,8 +17,6 @@ import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public abstract class WineInstaller {
     private static final ExecutorService OPERATIONS = Executors.newSingleThreadExecutor(runnable -> {
@@ -207,14 +205,24 @@ public abstract class WineInstaller {
         return null;
     }
 
-    static File findWineExecutable(File root) {
-        if (root == null) return null;
+    public static File findWineExecutable(File root) {
+        if (root == null || !root.isDirectory() || FileUtils.isSymlink(root)) return null;
+
+        File manifestFile = new File(root, CompatibilityRuntimeManifest.FILE_NAME);
+        if (manifestFile.exists() || FileUtils.isSymlink(manifestFile)) {
+            CompatibilityRuntimeManifest manifest = CompatibilityRuntimeManifest.read(root);
+            if (manifest == null || !manifest.validateWineDirectory(root)) return null;
+
+            File wineExecutable = new File(root, manifest.wineExecutable);
+            return CompatibilityRuntimePackage.isSupportedWineElf(wineExecutable) ? wineExecutable : null;
+        }
+
         File bin = new File(root, "bin");
         File wine64 = new File(bin, "wine64");
-        if (CompatibilityRuntimePackage.isAarch64Elf(wine64)) return wine64;
+        if (CompatibilityRuntimePackage.isSupportedWineElf(wine64)) return wine64;
 
         File wine = new File(bin, "wine");
-        return CompatibilityRuntimePackage.isAarch64Elf(wine) ? wine : null;
+        return CompatibilityRuntimePackage.isSupportedWineElf(wine) ? wine : null;
     }
 
     private static boolean hasWineRuntimeBinaries(File root) {
@@ -254,13 +262,8 @@ public abstract class WineInstaller {
 
         final AtomicReference<WineInfo> wineInfoRef = new AtomicReference<>();
         Callback<String> outputCallback = (line) -> {
-            Pattern pattern = Pattern.compile("^wine\\-([0-9\\.]+)\\-?([0-9\\.]+)?", Pattern.CASE_INSENSITIVE);
-            Matcher matcher = pattern.matcher(line);
-            if (matcher.find()) {
-                String version = matcher.group(1);
-                String subversion = matcher.group(2);
-                wineInfoRef.set(new WineInfo(version, subversion, winePath));
-            }
+            String version = WineInfo.parseVersionOutput(line);
+            if (version != null) wineInfoRef.set(new WineInfo(version, null, winePath));
         };
 
         File linkFile = new File(rootDir, RootFS.HOME_PATH);

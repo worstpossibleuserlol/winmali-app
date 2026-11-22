@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
  */
 public final class CompatibilityRuntimePackage {
     private static final Pattern VERSION_PATTERN = Pattern.compile(
-        "[0-9]+(?:\\.[0-9]+){1,3}(?:[-+][A-Za-z0-9][A-Za-z0-9.-]*)?"
+        "[0-9]+(?:\\.[0-9]+){1,3}(?:[A-Za-z][A-Za-z0-9.-]*|[-+][A-Za-z0-9][A-Za-z0-9.-]*)?"
     );
 
     private CompatibilityRuntimePackage() {}
