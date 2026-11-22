@@ -8,6 +8,7 @@ import android.system.Os;
 
 import com.winlator.R;
 import com.winlator.core.Callback;
+import com.winlator.core.CompatibilityRuntimePackage;
 import com.winlator.core.FileUtils;
 import com.winlator.core.TarCompressorUtils;
 import com.winlator.core.WineInfo;
@@ -134,17 +135,28 @@ public class ContainerManager {
 
     public void createContainerAsync(final JSONObject data, Callback<Container> callback) {
         final Handler handler = new Handler(context.getMainLooper());
-        OPERATIONS.execute(() -> {
-            Container created = null;
-            try {
-                created = createContainer(data);
+
+        // First-run system-file installation is asynchronous. Wait for the shared
+        // installer result instead of racing it and returning a misleading "missing" error.
+        RootFSInstaller.ensureInstalled(context, (systemFilesReady) -> {
+            if (!systemFilesReady) {
+                lastCreateError = R.string.container_create_system_files_missing;
+                if (callback != null) handler.post(() -> callback.call(null));
+                return;
             }
-            catch (Exception error) {
-                lastCreateError = R.string.container_create_unexpected_error;
-                android.util.Log.e("WinMali-Containers", "Container creation failed", error);
-            }
-            final Container result = created;
-            if (callback != null) handler.post(() -> callback.call(result));
+
+            OPERATIONS.execute(() -> {
+                Container created = null;
+                try {
+                    created = createContainer(data);
+                }
+                catch (Exception error) {
+                    lastCreateError = R.string.container_create_unexpected_error;
+                    android.util.Log.e("WinMali-Containers", "Container creation failed", error);
+                }
+                final Container result = created;
+                if (callback != null) handler.post(() -> callback.call(result));
+            });
         });
     }
 
@@ -213,7 +225,7 @@ public class ContainerManager {
                 if (type != null) {
                     staging = new File(context.getCacheDir(), "winmali-import-"+UUID.randomUUID());
                     if (staging.mkdirs() && TarCompressorUtils.extract(type, context, sourceUri, staging)) {
-                        File backupRoot = findBackupRoot(staging, 2);
+                        File backupRoot = findBackupRoot(staging, 8);
                         if (backupRoot != null) imported = installImportedContainer(backupRoot);
                     }
                 }
@@ -295,7 +307,7 @@ public class ContainerManager {
             }
 
             RootFS rootFS = RootFS.find(context);
-            if (!rootFS.isValid() || rootFS.getVersion() < RootFSInstaller.LATEST_VERSION) {
+            if (!RootFSInstaller.isReady(context)) {
                 lastCreateError = R.string.container_create_system_files_missing;
                 return null;
             }
@@ -448,8 +460,11 @@ public class ContainerManager {
         File runtime = new File(rootFS.getInstalledWineDir(), wineVersion);
         File pattern = new File(rootFS.getInstalledWineDir(), "container-pattern-"+info.fullVersion()+".tzst");
         File bin = new File(runtime, "bin");
+        File wine = new File(bin, "wine");
+        File wine64 = new File(bin, "wine64");
         if (info.path == null || !runtime.isDirectory() ||
-            (!new File(bin, "wine").isFile() && !new File(bin, "wine64").isFile()) ||
+            (!CompatibilityRuntimePackage.isAarch64Elf(wine) &&
+             !CompatibilityRuntimePackage.isAarch64Elf(wine64)) ||
             !pattern.isFile() || pattern.length() == 0) {
             lastCreateError = R.string.container_create_custom_runtime_missing;
             return false;

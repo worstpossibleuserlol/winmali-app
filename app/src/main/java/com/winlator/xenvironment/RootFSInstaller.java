@@ -1,6 +1,8 @@
 package com.winlator.xenvironment;
 
+import android.app.Activity;
 import android.content.Context;
+import android.os.Handler;
 
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -10,6 +12,7 @@ import com.winlator.SettingsFragment;
 import com.winlator.container.Container;
 import com.winlator.container.ContainerManager;
 import com.winlator.core.AppUtils;
+import com.winlator.core.Callback;
 import com.winlator.core.DownloadProgressDialog;
 import com.winlator.core.FileUtils;
 import com.winlator.core.PreloaderDialog;
@@ -21,6 +24,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -33,6 +37,9 @@ public abstract class RootFSInstaller {
         thread.setDaemon(true);
         return thread;
     });
+    private static final Object INSTALL_LOCK = new Object();
+    private static final ArrayList<Callback<Boolean>> INSTALL_CALLBACKS = new ArrayList<>();
+    private static boolean installationRunning = false;
 
     public static final byte LATEST_VERSION = 23; // TODO increment it on rootfs update
     public static final byte UPDATE_WINEPREFIX_VERSION = 16; // set it if main wine version change
@@ -57,108 +64,203 @@ public abstract class RootFSInstaller {
         }
     }
 
+    public static boolean isReady(Context context) {
+        if (context == null) return false;
+        RootFS rootFS = RootFS.find(context);
+        return rootFS.isValid() && rootFS.getVersion() >= LATEST_VERSION;
+    }
+
+    public static boolean isInstalling() {
+        synchronized (INSTALL_LOCK) {
+            return installationRunning;
+        }
+    }
+
     public static void install(final MainActivity activity) {
-        AppUtils.keepScreenOn(activity);
-        RootFS rootFS = RootFS.find(activity);
-        final File rootDir = rootFS.getRootDir();
-        final File parentDir = rootDir.getAbsoluteFile().getParentFile();
+        ensureInstalled(activity, null);
+    }
 
-        final DownloadProgressDialog dialog = new DownloadProgressDialog(activity);
-        dialog.show(R.string.installing_system_files);
+    public static void installIfNeeded(final MainActivity activity) {
+        ensureInstalled(activity, null);
+    }
+
+    public static void ensureInstalled(final Context context, final Callback<Boolean> callback) {
+        if (context == null) {
+            if (callback != null) callback.call(false);
+            return;
+        }
+
+        Context appContext = context.getApplicationContext();
+        if (appContext == null) appContext = context;
+
+        if (isReady(appContext)) {
+            if (callback != null) new Handler(context.getMainLooper()).post(() -> callback.call(true));
+            return;
+        }
+
+        synchronized (INSTALL_LOCK) {
+            if (callback != null) INSTALL_CALLBACKS.add(callback);
+            if (installationRunning) return;
+            installationRunning = true;
+        }
+
+        final Activity activity = context instanceof Activity ? (Activity)context : null;
+        final DownloadProgressDialog dialog = activity != null ? new DownloadProgressDialog(activity) : null;
+        if (activity != null) {
+            activity.runOnUiThread(() -> {
+                if (!activity.isFinishing() && dialog != null) {
+                    AppUtils.keepScreenOn(activity);
+                    dialog.show(R.string.installing_system_files);
+                }
+            });
+        }
+
+        final Context installationContext = appContext;
         OPERATIONS.execute(() -> {
-            File stagingDir = null;
-            File backupDir = null;
-            boolean success = false;
-            try {
-                if (parentDir == null || (!parentDir.isDirectory() && !parentDir.mkdirs())) {
-                    throw new java.io.IOException("Unable to prepare rootfs parent directory");
-                }
-
-                String token = UUID.randomUUID().toString();
-                stagingDir = new File(parentDir, rootDir.getName()+".install-"+token);
-                backupDir = new File(parentDir, rootDir.getName()+".backup-"+token);
-                if (!stagingDir.mkdirs()) throw new java.io.IOException("Unable to create rootfs staging directory");
-
-                final long contentLength = TarCompressorUtils.getContentLength(
-                    TarCompressorUtils.Type.ZSTD, activity, FILENAME, stagingDir);
-                AtomicLong totalSizeRef = new AtomicLong();
-                boolean extracted = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD,
-                    activity, FILENAME, stagingDir, (file, size) -> {
-                        if (size > 0) {
-                            long totalSize = totalSizeRef.addAndGet(size);
-                            final int progress = contentLength > 0 ?
-                                Math.min(100, (int)(((double)totalSize / contentLength) * 100)) : 0;
-                            activity.runOnUiThread(() -> dialog.setProgress(progress));
-                        }
-                        return file;
-                    });
-
-                if (!extracted || !RootFS.hasCoreWineFiles(stagingDir)) {
-                    throw new java.io.IOException("Extracted rootfs is incomplete or missing Wine runtime files");
-                }
-
-                // Preserve user containers and separately installed Wine runtimes.
-                File oldHome = new File(rootDir, "home");
-                File newHome = new File(stagingDir, "home");
-                if (oldHome.isDirectory() && !FileUtils.copy(oldHome, newHome)) {
-                    throw new java.io.IOException("Unable to preserve container data");
-                }
-
-                File oldInstalledWine = new File(rootDir, "opt/installed-wine");
-                File newOpt = new File(stagingDir, "opt");
-                File newInstalledWine = new File(newOpt, "installed-wine");
-                if (oldInstalledWine.isDirectory()) {
-                    if (!newOpt.isDirectory() && !newOpt.mkdirs()) throw new java.io.IOException("Unable to prepare Wine runtime directory");
-                    if (!FileUtils.copy(oldInstalledWine, newInstalledWine)) {
-                        throw new java.io.IOException("Unable to preserve installed Wine runtimes");
-                    }
-                }
-
-                File infoDir = new File(stagingDir, ".winlator");
-                if (!infoDir.isDirectory() && !infoDir.mkdirs()) throw new java.io.IOException("Unable to write rootfs version");
-                if (!FileUtils.writeString(new File(infoDir, ".rfs_version"), String.valueOf(LATEST_VERSION))) {
-                    throw new java.io.IOException("Unable to write rootfs version");
-                }
-
-                boolean hadOriginal = rootDir.exists();
-                if (hadOriginal && !rootDir.renameTo(backupDir)) {
-                    throw new java.io.IOException("Unable to move previous rootfs");
-                }
-                if (!stagingDir.renameTo(rootDir)) {
-                    if (hadOriginal) backupDir.renameTo(rootDir);
-                    throw new java.io.IOException("Unable to activate the new rootfs");
-                }
-
-                if (!RootFS.find(activity).isValid() ||
-                    RootFS.find(activity).getVersion() != LATEST_VERSION ||
-                    !RootFS.hasCoreWineFiles(rootDir)) {
-                    FileUtils.delete(rootDir);
-                    if (hadOriginal) backupDir.renameTo(rootDir);
-                    throw new java.io.IOException("Rootfs integrity check failed after installation");
-                }
-
-                success = true;
-                if (backupDir.exists()) FileUtils.delete(backupDir);
-                SettingsFragment.resetPreferenceVersions(activity);
-                resetContainerRFSVersions(activity);
+            boolean success = installNow(installationContext, activity, dialog);
+            ArrayList<Callback<Boolean>> callbacks;
+            synchronized (INSTALL_LOCK) {
+                callbacks = new ArrayList<>(INSTALL_CALLBACKS);
+                INSTALL_CALLBACKS.clear();
+                installationRunning = false;
             }
-            catch (Exception error) {
-                android.util.Log.e("WinMali-RootFS", "System files installation failed", error);
+
+            if (!success && activity != null && !activity.isFinishing()) {
                 AppUtils.showToast(activity, R.string.unable_to_install_system_files);
             }
-            finally {
-                if (stagingDir != null && stagingDir.exists()) FileUtils.delete(stagingDir);
-                if (!success && backupDir != null && backupDir.exists() && !rootDir.exists()) {
-                    backupDir.renameTo(rootDir);
-                }
-                dialog.closeOnUiThread();
+
+            Handler handler = new Handler(installationContext.getMainLooper());
+            for (Callback<Boolean> pending : callbacks) {
+                handler.post(() -> {
+                    try {
+                        pending.call(success);
+                    }
+                    catch (RuntimeException error) {
+                        android.util.Log.e("WinMali-RootFS", "Installer completion callback failed", error);
+                    }
+                });
             }
         });
     }
 
-    public static void installIfNeeded(final MainActivity activity) {
-        RootFS rootFS = RootFS.find(activity);
-        if (!rootFS.isValid() || rootFS.getVersion() < LATEST_VERSION) install(activity);
+    private static boolean hasValidRootFSAsset(Context context) {
+        try (InputStream input = context.getAssets().open(FILENAME)) {
+            byte[] magic = new byte[4];
+            int read = 0;
+            while (read < magic.length) {
+                int count = input.read(magic, read, magic.length - read);
+                if (count < 0) return false;
+                read += count;
+            }
+            return (magic[0] & 0xff) == 0x28 && (magic[1] & 0xff) == 0xb5 &&
+                (magic[2] & 0xff) == 0x2f && (magic[3] & 0xff) == 0xfd;
+        }
+        catch (Exception error) {
+            android.util.Log.e("WinMali-RootFS", "RootFS archive is missing or unreadable", error);
+            return false;
+        }
+    }
+
+    private static boolean installNow(Context context, Activity activity, DownloadProgressDialog dialog) {
+        RootFS rootFS = RootFS.find(context);
+        final File rootDir = rootFS.getRootDir();
+        final File parentDir = rootDir.getAbsoluteFile().getParentFile();
+
+        File stagingDir = null;
+        File backupDir = null;
+        boolean success = false;
+        try {
+            if (!hasValidRootFSAsset(context)) {
+                throw new java.io.IOException("Bundled rootfs.tzst is missing or is not a Zstandard archive");
+            }
+            if (parentDir == null || (!parentDir.isDirectory() && !parentDir.mkdirs())) {
+                throw new java.io.IOException("Unable to prepare rootfs parent directory");
+            }
+
+            String token = UUID.randomUUID().toString();
+            stagingDir = new File(parentDir, rootDir.getName()+".install-"+token);
+            backupDir = new File(parentDir, rootDir.getName()+".backup-"+token);
+            if (!stagingDir.mkdirs()) throw new java.io.IOException("Unable to create rootfs staging directory");
+
+            final long contentLength = TarCompressorUtils.getContentLength(
+                TarCompressorUtils.Type.ZSTD, context, FILENAME, stagingDir);
+            AtomicLong totalSizeRef = new AtomicLong();
+            boolean extracted = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD,
+                context, FILENAME, stagingDir, (file, size) -> {
+                    if (size > 0) {
+                        long totalSize = totalSizeRef.addAndGet(size);
+                        final int progress = contentLength > 0 ?
+                            Math.min(100, (int)(((double)totalSize / contentLength) * 100)) : 0;
+                        if (activity != null && dialog != null && !activity.isFinishing()) {
+                            activity.runOnUiThread(() -> dialog.setProgress(progress));
+                        }
+                    }
+                    return file;
+                });
+
+            if (!extracted || !RootFS.hasCoreWineFiles(stagingDir)) {
+                throw new java.io.IOException("Extracted rootfs is incomplete or missing Wine runtime files");
+            }
+
+            // Never follow a symlink when preserving the user's existing home tree.
+            File oldHome = new File(rootDir, "home");
+            File newHome = new File(stagingDir, "home");
+            if (oldHome.isDirectory() && !FileUtils.isSymlink(oldHome) && !FileUtils.copy(oldHome, newHome)) {
+                throw new java.io.IOException("Unable to preserve container data");
+            }
+
+            File oldInstalledWine = new File(rootDir, "opt/installed-wine");
+            File newOpt = new File(stagingDir, "opt");
+            File newInstalledWine = new File(newOpt, "installed-wine");
+            if (oldInstalledWine.isDirectory() && !FileUtils.isSymlink(oldInstalledWine)) {
+                if (!newOpt.isDirectory() && !newOpt.mkdirs()) throw new java.io.IOException("Unable to prepare Wine runtime directory");
+                if (!FileUtils.copy(oldInstalledWine, newInstalledWine)) {
+                    throw new java.io.IOException("Unable to preserve installed Wine runtimes");
+                }
+            }
+
+            File infoDir = new File(stagingDir, ".winlator");
+            if (!infoDir.isDirectory() && !infoDir.mkdirs()) throw new java.io.IOException("Unable to write rootfs version");
+            if (!FileUtils.writeString(new File(infoDir, ".rfs_version"), String.valueOf(LATEST_VERSION))) {
+                throw new java.io.IOException("Unable to write rootfs version");
+            }
+
+            boolean hadOriginal = rootDir.exists();
+            if (hadOriginal && !rootDir.renameTo(backupDir)) {
+                throw new java.io.IOException("Unable to move previous rootfs");
+            }
+            if (!stagingDir.renameTo(rootDir)) {
+                if (hadOriginal) backupDir.renameTo(rootDir);
+                throw new java.io.IOException("Unable to activate the new rootfs");
+            }
+
+            RootFS installedRoot = RootFS.find(context);
+            if (!installedRoot.isValid() || installedRoot.getVersion() != LATEST_VERSION ||
+                !RootFS.hasCoreWineFiles(rootDir)) {
+                FileUtils.delete(rootDir);
+                if (hadOriginal) backupDir.renameTo(rootDir);
+                throw new java.io.IOException("Rootfs integrity check failed after installation");
+            }
+
+            success = true;
+            if (backupDir.exists()) FileUtils.delete(backupDir);
+            if (activity instanceof AppCompatActivity) {
+                SettingsFragment.resetPreferenceVersions((AppCompatActivity)activity);
+            }
+            resetContainerRFSVersions(context);
+            return true;
+        }
+        catch (Exception error) {
+            android.util.Log.e("WinMali-RootFS", "System files installation failed", error);
+            return false;
+        }
+        finally {
+            if (stagingDir != null && stagingDir.exists()) FileUtils.delete(stagingDir);
+            if (!success && backupDir != null && backupDir.exists() && !rootDir.exists()) {
+                backupDir.renameTo(rootDir);
+            }
+            if (dialog != null) dialog.closeOnUiThread();
+        }
     }
 
     private static void clearOptDir(File optDir) {

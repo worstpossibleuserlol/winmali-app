@@ -30,14 +30,25 @@ public class RootFS {
         File legacyDir = new File(context.getFilesDir(), "imagefs");
         File rootDir = new File(context.getFilesDir(), "rootfs");
 
-        // Prefer the current location, but never lose access to a legacy rootfs
-        // when migration cannot rename it (for example, filesystem or storage errors).
-        if (!rootDir.exists() && legacyDir.isDirectory() && !legacyDir.renameTo(rootDir)) {
-            return new RootFS(legacyDir);
+        RootFS current = new RootFS(rootDir);
+        RootFS legacy = new RootFS(legacyDir);
+        boolean currentValid = current.isValid();
+        boolean legacyValid = legacy.isValid();
+
+        // A stale or partially extracted rootfs must not hide a healthy legacy imagefs.
+        if (currentValid && legacyValid) {
+            return current.getVersion() >= legacy.getVersion() ? current : legacy;
         }
-        if (rootDir.isDirectory()) return new RootFS(rootDir);
-        if (legacyDir.isDirectory()) return new RootFS(legacyDir);
-        return new RootFS(rootDir);
+        if (currentValid) return current;
+        if (legacyValid) return legacy;
+
+        // Preserve the old migration behaviour when neither tree is fully valid.
+        if (!rootDir.exists() && legacyDir.isDirectory() && !legacyDir.renameTo(rootDir)) {
+            return legacy;
+        }
+        if (rootDir.isDirectory()) return current;
+        if (legacyDir.isDirectory()) return legacy;
+        return current;
     }
 
     public File getRootDir() {
@@ -55,11 +66,14 @@ public class RootFS {
         File bin = new File(wine, "bin");
         File wineBinary = new File(bin, "wine");
         File wine64Binary = new File(bin, "wine64");
-        boolean hasWine = (wineBinary.isFile() && wineBinary.length() > 0) ||
-            (wine64Binary.isFile() && wine64Binary.length() > 0);
-        return hasWine &&
-            new File(wine, "lib/wine/x86_64-windows").isDirectory() &&
-            new File(wine, "lib/wine/i386-windows").isDirectory();
+        boolean hasWine = CompatibilityRuntimePackage.isAarch64Elf(wine64Binary) ||
+            CompatibilityRuntimePackage.isAarch64Elf(wineBinary);
+        File x64Libraries = new File(wine, "lib/wine/x86_64-windows");
+        File x86Libraries = new File(wine, "lib/wine/i386-windows");
+        File[] x64Files = x64Libraries.listFiles();
+        File[] x86Files = x86Libraries.listFiles();
+        return hasWine && x64Libraries.isDirectory() && x86Libraries.isDirectory() &&
+            x64Files != null && x64Files.length > 0 && x86Files != null && x86Files.length > 0;
     }
 
     public int getVersion() {
@@ -69,7 +83,8 @@ public class RootFS {
             java.util.ArrayList<String> lines = FileUtils.readLines(rfsVersionFile, true);
             return lines.isEmpty() ? 0 : Math.max(0, Integer.parseInt(lines.get(0).trim()));
         }
-        catch (NumberFormatException e) {
+        catch (Exception e) {
+            android.util.Log.w("WinMali-RootFS", "Unable to read rootfs version", e);
             return 0;
         }
     }
