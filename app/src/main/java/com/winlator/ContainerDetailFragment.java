@@ -220,7 +220,10 @@ public class ContainerDetailFragment extends Fragment {
                     container.setStartupSelection(startupSelection);
                     container.setBox64Preset(box64Preset);
                     container.setDesktopTheme(desktopTheme);
-                    container.saveData();
+                    if (!container.saveData()) {
+                        AppUtils.showToast(context, R.string.unable_to_save_container_settings);
+                        return;
+                    }
 
                     saveWineRegistryKeys(view);
 
