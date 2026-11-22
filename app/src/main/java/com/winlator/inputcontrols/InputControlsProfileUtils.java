@@ -25,7 +25,7 @@ final class InputControlsProfileUtils {
         safeName = safeName.replace("..", ".");
         safeName = safeName.replaceAll("[. ]+$", "").trim();
         while (safeName.startsWith(".")) safeName = safeName.substring(1);
-        if (safeName.replaceAll("[^\p{L}\p{N}]", "").isEmpty()) safeName = "";
+        if (safeName.replaceAll("[^\\p{L}\\p{N}]", "").isEmpty()) safeName = "";
         if (safeName.isEmpty()) safeName = "Controls-" + Math.max(0, profileId);
         if (safeName.length() > 100) safeName = safeName.substring(0, 100);
         return safeName + ".icp";
