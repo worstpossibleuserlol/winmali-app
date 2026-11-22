@@ -35,14 +35,14 @@ public final class CompatibilityRuntimePackage {
         if (second == null) return 1;
 
         java.util.regex.Matcher firstMatcher =
-            Pattern.compile("^([0-9]+(?:\\\\.[0-9]+){1,3})(.*)$").matcher(first);
+            Pattern.compile("^([0-9]+(?:\\.[0-9]+){1,3})(.*)$").matcher(first);
         java.util.regex.Matcher secondMatcher =
-            Pattern.compile("^([0-9]+(?:\\\\.[0-9]+){1,3})(.*)$").matcher(second);
+            Pattern.compile("^([0-9]+(?:\\.[0-9]+){1,3})(.*)$").matcher(second);
         if (!firstMatcher.matches() || !secondMatcher.matches()) {
             return first.compareToIgnoreCase(second);
         }
 
-        String[] firstParts = firstMatcher.group(1).split("\\\\.");
+        String[] firstParts = firstMatcher.group(1).split("\\.");
         String[] secondParts = secondMatcher.group(1).split("\\\\.");
         int count = Math.max(firstParts.length, secondParts.length);
         for (int i = 0; i < count; i++) {
