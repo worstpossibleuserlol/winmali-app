@@ -188,6 +188,47 @@ public abstract class FileUtils {
         }
     }
 
+    private static boolean copyStreamAtomically(InputStream source, File destination) {
+        if (source == null || destination == null) return false;
+        File parent = destination.getAbsoluteFile().getParentFile();
+        if (parent == null || (!parent.isDirectory() && !parent.mkdirs())) return false;
+
+        File temporary = null;
+        boolean moved = false;
+        try {
+            temporary = File.createTempFile(".winmali-copy-", ".tmp", parent);
+            long copied = 0;
+            try (BufferedOutputStream output = new BufferedOutputStream(
+                    new FileOutputStream(temporary), StreamUtils.BUFFER_SIZE)) {
+                byte[] buffer = new byte[StreamUtils.BUFFER_SIZE];
+                int count;
+                while ((count = source.read(buffer)) != -1) {
+                    output.write(buffer, 0, count);
+                    copied += count;
+                }
+                output.flush();
+            }
+
+            if (!temporary.isFile() || temporary.length() != copied) return false;
+            try {
+                Files.move(temporary.toPath(), destination.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            }
+            catch (AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
+            moved = destination.isFile() && destination.length() == copied;
+            return moved;
+        }
+        catch (IOException | RuntimeException error) {
+            android.util.Log.w("WinMali-FileUtils", "Atomic file copy failed: "+destination, error);
+            return false;
+        }
+        finally {
+            if (temporary != null && temporary.exists()) temporary.delete();
+        }
+    }
+
     public static boolean copy(File srcFile, File dstFile) {
         return copy(srcFile, dstFile, null);
     }
@@ -217,10 +258,9 @@ public abstract class FileUtils {
             return false;
         }
 
-        // Replace a destination link itself, never write through to its target.
-        if (isSymlink(dstFile) && !delete(dstFile)) return false;
-
         if (srcFile.isDirectory()) {
+            // Remove a destination directory symlink itself, never recurse into its target.
+            if (isSymlink(dstFile) && !delete(dstFile)) return false;
             if (isAscendantOf(srcFile, dstFile) || (!dstFile.isDirectory() && !dstFile.mkdirs())) return false;
             if (callback != null) callback.call(dstFile);
 
@@ -233,18 +273,14 @@ public abstract class FileUtils {
             }
         }
         else {
-            File parent = dstFile.getParentFile();
-            if (!srcFile.exists() || (parent != null && !parent.exists() && !parent.mkdirs())) return false;
+            if (!srcFile.isFile()) return false;
 
-            try (InputStream inStream = new BufferedInputStream(new FileInputStream(srcFile), StreamUtils.BUFFER_SIZE);
-                 OutputStream outStream = new BufferedOutputStream(new FileOutputStream(dstFile), StreamUtils.BUFFER_SIZE)) {
-                if (!StreamUtils.copy(inStream, outStream)) return false;
-                if (dstFile.length() != srcFile.length()) return false;
-
+            try (InputStream inStream = new BufferedInputStream(new FileInputStream(srcFile), StreamUtils.BUFFER_SIZE)) {
+                if (!copyStreamAtomically(inStream, dstFile) || dstFile.length() != srcFile.length()) return false;
                 if (callback != null) callback.call(dstFile);
                 return true;
             }
-            catch (IOException e) {
+            catch (IOException | RuntimeException error) {
                 return false;
             }
         }
@@ -252,7 +288,7 @@ public abstract class FileUtils {
     }
 
     public static boolean copy(Context context, String assetFile, File dstFile) {
-        if (context == null || assetFile == null || dstFile == null) return false;
+        if (context == null || assetFile == null || dstFile == null || isSymlink(dstFile)) return false;
         if (isDirectory(context, assetFile)) {
             if (!dstFile.isDirectory() && !dstFile.mkdirs()) return false;
             try {
@@ -270,15 +306,11 @@ public abstract class FileUtils {
         }
 
         if (dstFile.isDirectory()) dstFile = new File(dstFile, FileUtils.getName(assetFile));
-        File parent = dstFile.getParentFile();
-        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) return false;
-        try (InputStream inStream = context.getAssets().open(assetFile);
-             BufferedOutputStream outStream = new BufferedOutputStream(new FileOutputStream(dstFile), StreamUtils.BUFFER_SIZE)) {
-            if (!StreamUtils.copy(inStream, outStream)) return false;
-            outStream.flush();
-            return dstFile.isFile() && dstFile.length() > 0;
+        if (isSymlink(dstFile)) return false;
+        try (InputStream inStream = context.getAssets().open(assetFile)) {
+            return copyStreamAtomically(inStream, dstFile);
         }
-        catch (IOException e) {
+        catch (IOException | RuntimeException error) {
             return false;
         }
     }
