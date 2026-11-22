@@ -35,19 +35,36 @@ public abstract class WineInstaller {
         rootFS.setWinePath(wineInfo.path);
 
         final File containerPatternDir = new File(installedWineDir, "/preinstall/container-pattern");
-        if (containerPatternDir.isDirectory()) FileUtils.delete(containerPatternDir);
-        containerPatternDir.mkdirs();
-
-        File linkFile = new File(rootDir, RootFS.HOME_PATH);
-        FileUtils.symlink(containerPatternDir.getPath(), linkFile.getPath());
+        if (FileUtils.isSymlink(containerPatternDir) || containerPatternDir.exists()) {
+            if (!FileUtils.delete(containerPatternDir)) {
+                AppUtils.showToast(activity, R.string.unable_to_install_wine);
+                return;
+            }
+        }
+        if (!containerPatternDir.mkdirs() || !containerPatternDir.isDirectory()) {
+            AppUtils.showToast(activity, R.string.unable_to_install_wine);
+            return;
+        }
 
         GuestProgramLauncherComponent guestProgramLauncherComponent = environment.getComponent(GuestProgramLauncherComponent.class);
+        if (guestProgramLauncherComponent == null) {
+            FileUtils.delete(new File(installedWineDir, "/preinstall"));
+            AppUtils.showToast(activity, R.string.unable_to_install_wine);
+            return;
+        }
+
+        File linkFile = new File(rootDir, RootFS.HOME_PATH);
+        if (!FileUtils.symlink(containerPatternDir.getPath(), linkFile.getPath())) {
+            FileUtils.delete(new File(installedWineDir, "/preinstall"));
+            AppUtils.showToast(activity, R.string.unable_to_install_wine);
+            return;
+        }
         guestProgramLauncherComponent.setBox64Preset(Box64Preset.STABILITY);
         guestProgramLauncherComponent.setGuestExecutable("wine explorer /desktop=shell,"+ Container.DEFAULT_SCREEN_SIZE+" C:\\windows\\system32\\winecfg.exe");
 
         final PreloaderDialog preloaderDialog = new PreloaderDialog(activity);
         guestProgramLauncherComponent.setTerminationCallback((status) -> OPERATIONS.execute(() -> {
-            if (status > 0) {
+            if (status != 0) {
                 AppUtils.showToast(activity, R.string.unable_to_install_wine);
                 FileUtils.delete(new File(installedWineDir, "/preinstall"));
                 AppUtils.restartApplication(activity);
@@ -55,7 +72,13 @@ public abstract class WineInstaller {
             }
 
             preloaderDialog.showOnUiThread(R.string.finishing_installation);
-            FileUtils.writeString(new File(rootDir, RootFS.WINEPREFIX+"/.update-timestamp"), "disable\n");
+            if (!FileUtils.writeString(new File(rootDir, RootFS.WINEPREFIX+"/.update-timestamp"), "disable\n")) {
+                AppUtils.showToast(activity, R.string.unable_to_install_wine);
+                FileUtils.delete(new File(installedWineDir, "/preinstall"));
+                preloaderDialog.closeOnUiThread();
+                AppUtils.restartApplication(activity);
+                return;
+            }
 
             File userDir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/users/xuser");
             File[] userFiles = userDir.listFiles();
@@ -63,8 +86,13 @@ public abstract class WineInstaller {
                 for (File userFile : userFiles) {
                     if (FileUtils.isSymlink(userFile)) {
                         String path = userFile.getPath();
-                        userFile.delete();
-                        (new File(path)).mkdirs();
+                        if (!FileUtils.delete(userFile) || !(new File(path)).mkdirs()) {
+                            AppUtils.showToast(activity, R.string.unable_to_install_wine);
+                            FileUtils.delete(new File(installedWineDir, "/preinstall"));
+                            preloaderDialog.closeOnUiThread();
+                            AppUtils.restartApplication(activity);
+                            return;
+                        }
                     }
                 }
             }
@@ -100,9 +128,12 @@ public abstract class WineInstaller {
     public static void extractWineFileForInstallAsync(Context context, Uri uri, Callback<File> callback) {
         OPERATIONS.execute(() -> {
             File destination = new File(RootFS.find(context).getInstalledWineDir(), "/preinstall/wine");
-            FileUtils.delete(destination);
-            destination.mkdirs();
-            TarCompressorUtils.Type archiveType = TarCompressorUtils.detectType(context, uri);
+            if ((FileUtils.isSymlink(destination) || destination.exists()) && !FileUtils.delete(destination)) {
+                if (callback != null) callback.call(null);
+                return;
+            }
+            boolean prepared = destination.mkdirs() && destination.isDirectory();
+            TarCompressorUtils.Type archiveType = prepared ? TarCompressorUtils.detectType(context, uri) : null;
             boolean success = archiveType != null && TarCompressorUtils.extract(archiveType, context, uri, destination);
             if (!success) FileUtils.delete(destination);
             if (callback != null) callback.call(success ? destination : null);

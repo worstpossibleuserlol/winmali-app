@@ -174,6 +174,23 @@ public abstract class GeneralComponents {
         return file;
     }
 
+    private static File getAdrenotoolsLibraryFile(File source) {
+        if (source == null || !source.isDirectory() || FileUtils.isSymlink(source)) return null;
+        File[] manifests = source.listFiles((directory, name) -> name.toLowerCase(Locale.ENGLISH).endsWith(".json"));
+        if (manifests == null || manifests.length != 1 || !manifests[0].isFile()) return null;
+        try {
+            JSONObject manifest = new JSONObject(FileUtils.readString(manifests[0]));
+            String libraryName = manifest.optString("libraryName", "");
+            if (libraryName.isEmpty() || !libraryName.matches("[A-Za-z0-9._-]+") ||
+                libraryName.equals(".") || libraryName.equals("..")) return null;
+            File library = new File(source, libraryName);
+            return library.isFile() && library.length() > 0 && !FileUtils.isSymlink(library) ? library : null;
+        }
+        catch (JSONException | RuntimeException error) {
+            return null;
+        }
+    }
+
     public static ArrayList<String> getInstalledComponentNames(Type type, Context context) {
         File componentDir = getComponentDir(type, context);
         ArrayList<String> result = new ArrayList<>();
@@ -188,7 +205,7 @@ public abstract class GeneralComponents {
                 supported = entry.isFile() && name.toLowerCase(Locale.ENGLISH).endsWith(".sf2");
             }
             else if (type == Type.ADRENOTOOLS_DRIVER) {
-                supported = entry.isDirectory();
+                supported = entry.isDirectory() && getAdrenotoolsLibraryFile(entry) != null;
             }
             else {
                 supported = entry.isFile() &&
@@ -214,25 +231,14 @@ public abstract class GeneralComponents {
 
             String filename = identifier+".sf2";
             destination = new File(destination, filename);
-            FileUtils.copy(context, type.assetFolder()+"/"+filename, destination);
+            if (!FileUtils.copy(context, type.assetFolder()+"/"+filename, destination) ||
+                !destination.isFile() || destination.length() == 0) return null;
             return destination.getPath();
         }
         else if (type == Type.ADRENOTOOLS_DRIVER) {
             if (isBuiltinComponent(type, identifier)) return null;
-            File source = type.getSource(context, identifier);
-            File[] manifestFiles = source.listFiles((file, name) -> name.endsWith(".json"));
-            if (manifestFiles != null && manifestFiles.length > 0) {
-                try {
-                    JSONObject manifestJSONObject = new JSONObject(FileUtils.readString(manifestFiles[0]));
-                    String libraryName = manifestJSONObject.optString("libraryName", "");
-                    if (libraryName.isEmpty() || !new File(libraryName).getName().equals(libraryName)) return null;
-                    File libraryFile = new File(source, libraryName);
-                    return libraryFile.isFile() ? libraryFile.getPath() : null;
-                }
-                catch (JSONException e) {
-                    return null;
-                }
-            }
+            File libraryFile = getAdrenotoolsLibraryFile(type.getSource(context, identifier));
+            return libraryFile != null ? libraryFile.getPath() : null;
         }
 
         return type.getSource(context, identifier).getPath();
@@ -485,8 +491,12 @@ public abstract class GeneralComponents {
                                         !filename.equals(".") && !filename.equals("..")) {
                                         File destination = new File(getComponentDir(type, activity), filename);
                                         if (ZipUtils.extract(source, destination)) {
-                                            importedIdentifier = filename;
-                                            feedbackMessage = R.string.component_imported;
+                                            File libraryFile = getAdrenotoolsLibraryFile(destination);
+                                            if (libraryFile != null && libraryFile.getName().equals(filename)) {
+                                                importedIdentifier = filename;
+                                                feedbackMessage = R.string.component_imported;
+                                            }
+                                            else FileUtils.delete(destination);
                                         }
                                     }
                                 }

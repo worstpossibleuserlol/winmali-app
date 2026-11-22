@@ -161,13 +161,23 @@ public class ContainerManager {
     }
 
     public void duplicateContainerAsync(Container container, Runnable callback) {
+        duplicateContainerAsync(container, (Callback<Boolean>) (success) -> {
+            if (callback != null) callback.run();
+        });
+    }
+
+    public void duplicateContainerAsync(Container container, Callback<Boolean> callback) {
         final Handler handler = new Handler(context.getMainLooper());
         OPERATIONS.execute(() -> {
+            boolean duplicated = false;
             try {
-                duplicateContainer(container);
+                duplicated = duplicateContainer(container);
             }
-            catch (RuntimeException ignored) {}
-            if (callback != null) handler.post(callback);
+            catch (RuntimeException error) {
+                android.util.Log.e("WinMali-Containers", "Container duplication failed", error);
+            }
+            final boolean result = duplicated;
+            if (callback != null) handler.post(() -> callback.call(result));
         });
     }
 
@@ -472,17 +482,17 @@ public class ContainerManager {
         return true;
     }
 
-    private synchronized void duplicateContainer(Container srcContainer) {
+    private synchronized boolean duplicateContainer(Container srcContainer) {
         if (srcContainer == null || srcContainer.getRootDir() == null ||
-            !srcContainer.getRootDir().isDirectory()) return;
+            !srcContainer.getRootDir().isDirectory() || FileUtils.isSymlink(srcContainer.getRootDir())) return false;
         int id = nextAvailableContainerId();
 
         File dstDir = new File(homeDir, RootFS.USER+"-"+id);
-        if (!dstDir.mkdirs()) return;
+        if (!dstDir.mkdirs()) return false;
 
         if (!FileUtils.copy(srcContainer.getRootDir(), dstDir, (file) -> FileUtils.chmod(file, 0771))) {
             FileUtils.delete(dstDir);
-            return;
+            return false;
         }
 
         Container dstContainer = new Container(id);
@@ -493,17 +503,18 @@ public class ContainerManager {
         }
         catch (JSONException | RuntimeException error) {
             FileUtils.delete(dstDir);
-            return;
+            return false;
         }
 
         dstContainer.setName(srcContainer.getName()+" ("+context.getString(R.string.copy)+")");
         if (!dstContainer.saveData()) {
             FileUtils.delete(dstDir);
-            return;
+            return false;
         }
 
         maxContainerId = Math.max(maxContainerId, id);
         containers.add(dstContainer);
+        return true;
     }
 
     private synchronized boolean removeContainer(Container container) {
