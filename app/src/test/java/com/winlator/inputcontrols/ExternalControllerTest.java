@@ -21,4 +21,12 @@ public class ExternalControllerTest {
         controller.addControllerBinding(null);
         assertEquals(0, controller.getControllerBindingCount());
     }
+
+    @Test
+    public void cachedDeviceIdsMustStillMatchTheControllerDescriptor() {
+        assertTrue(ExternalController.hasMatchingDescriptor("bluetooth-controller", "bluetooth-controller"));
+        assertFalse(ExternalController.hasMatchingDescriptor("bluetooth-controller", "another-device"));
+        assertFalse(ExternalController.hasMatchingDescriptor(null, "bluetooth-controller"));
+        assertFalse(ExternalController.hasMatchingDescriptor("bluetooth-controller", null));
+    }
 }
