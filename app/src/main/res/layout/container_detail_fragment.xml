@@ -119,6 +119,28 @@
                     android:id="@+id/SWineVersion" />
             </LinearLayout>
 
+            <LinearLayout
+                android:id="@+id/LLAutoGPUProfile"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="8dp">
+
+                <CheckBox
+                    android:id="@+id/CBAutoGPUSettings"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/auto_gpu_settings" />
+
+                <TextView
+                    android:id="@+id/TVAutoGPUProfile"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingLeft="8dp"
+                    android:paddingRight="8dp"
+                    android:text="@string/gpu_profile_detecting" />
+            </LinearLayout>
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"

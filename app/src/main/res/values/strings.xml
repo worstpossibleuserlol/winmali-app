@@ -401,4 +401,9 @@
     <string name="present_mode">Present Mode</string>
     <string name="compatibility_runtime_bundle">Compatibility Runtime Bundle</string>
     <string name="compatibility_runtime_bundle_description">View Wine and Proton release references, Android host requirements, and supported Windows guest architectures.</string>
+
+    <string name="auto_gpu_settings">Automatically configure graphics for this device</string>
+    <string name="gpu_profile_detecting">Detecting GPU and graphics capabilities…</string>
+    <string name="gpu_profile_wait">Please wait for GPU detection to finish, or turn off automatic graphics settings to continue manually.</string>
+    <string name="gpu_profile_manual">Manual graphics settings selected. Choose the graphics drivers and Direct3D wrapper below.</string>
 </resources>
