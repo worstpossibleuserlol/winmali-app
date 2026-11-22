@@ -367,17 +367,23 @@ public class SettingsFragment extends Fragment {
         File wineDir = new File(wineInfo.path);
         File containerPatternFile = new File(installedWineDir, "container-pattern-"+wineInfo.fullVersion()+".tzst");
 
-        if (!wineDir.isDirectory() || !containerPatternFile.isFile()) {
+        if (!wineDir.isDirectory()) {
             AppUtils.showToast(activity, R.string.unable_to_remove_this_wine_version);
             return;
         }
 
         preloaderDialog.show(R.string.removing_wine);
         BACKGROUND_OPERATIONS.execute(() -> {
-            FileUtils.delete(wineDir);
-            FileUtils.delete(containerPatternFile);
+            boolean runtimeRemoved = FileUtils.delete(wineDir);
+            boolean patternRemoved = !containerPatternFile.exists() || FileUtils.delete(containerPatternFile);
             preloaderDialog.closeOnUiThread();
-            if (onSuccess != null) activity.runOnUiThread(onSuccess);
+
+            if (runtimeRemoved && patternRemoved) {
+                if (onSuccess != null) activity.runOnUiThread(onSuccess);
+            }
+            else {
+                activity.runOnUiThread(() -> AppUtils.showToast(activity, R.string.unable_to_remove_this_wine_version));
+            }
         });
     }
 
