@@ -254,7 +254,7 @@ public abstract class TarCompressorUtils {
     private static File resolveArchiveEntry(File root, String entryName) throws IOException {
         if (hasParentTraversal(entryName)) return null;
         File file = new File(root, entryName);
-        if (!isWithinDirectory(root, file) || hasSymlinkParent(root, file)) return null;
+        if (!isWithinDirectory(root, file) || hasSymlinkParent(root, file) || FileUtils.isSymlink(file)) return null;
         return file;
     }
 
