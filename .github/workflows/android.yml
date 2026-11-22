@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+      - beta
+      - development
+      - runtime-compatibility
+      - gpu-compatibility
     paths:
       - "**.gradle"
       - "**.java"
@@ -18,6 +22,7 @@ on:
   pull_request:
     branches:
       - main
+      - beta
   workflow_dispatch:
 
 concurrency:
