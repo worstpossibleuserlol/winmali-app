@@ -264,13 +264,8 @@ public abstract class WineInstaller {
 
         final AtomicReference<WineInfo> wineInfoRef = new AtomicReference<>();
         Callback<String> outputCallback = (line) -> {
-            Pattern pattern = Pattern.compile("^wine\\-([0-9\\.]+)\\-?([0-9\\.]+)?", Pattern.CASE_INSENSITIVE);
-            Matcher matcher = pattern.matcher(line);
-            if (matcher.find()) {
-                String version = matcher.group(1);
-                String subversion = matcher.group(2);
-                wineInfoRef.set(new WineInfo(version, subversion, winePath));
-            }
+            String version = WineInfo.parseVersionOutput(line);
+            if (version != null) wineInfoRef.set(new WineInfo(version, null, winePath));
         };
 
         File linkFile = new File(rootDir, RootFS.HOME_PATH);
