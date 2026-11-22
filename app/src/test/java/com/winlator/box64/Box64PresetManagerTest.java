@@ -42,6 +42,21 @@ public class Box64PresetManagerTest {
     }
 
     @Test
+    public void serializerPreservesDelimiterTextAndRoundTrips() {
+        String[] preset = new String[]{"CUSTOM-8", "Balanced, fast | stable", "A=one two,B=three|four"};
+        String serialized = Box64PresetManager.serializeCustomPresetEntry(preset);
+        assertArrayEquals(preset, Box64PresetManager.parseCustomPresetEntry(serialized));
+    }
+
+    @Test
+    public void serializerRejectsInvalidEntriesAndOversizedFields() {
+        assertNull(Box64PresetManager.serializeCustomPresetEntry(null));
+        assertNull(Box64PresetManager.serializeCustomPresetEntry(new String[]{"CUSTOM-0", "No", "A=B"}));
+        assertNull(Box64PresetManager.serializeCustomPresetEntry(
+            new String[]{"CUSTOM-1", "Name", new String(new char[65537]).replace('\0', 'x')}));
+    }
+
+    @Test
     public void rejectsCorruptedEncodedPresetFields() {
         assertNull(Box64PresetManager.parseCustomPresetEntry("B64|CUSTOM-4|%%%|%%%"));
     }

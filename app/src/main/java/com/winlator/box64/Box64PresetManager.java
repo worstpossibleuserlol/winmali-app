@@ -119,6 +119,16 @@ public abstract class Box64PresetManager {
             value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
+    static String serializeCustomPresetEntry(String[] preset) {
+        if (preset == null || preset.length != 3 ||
+            !CUSTOM_PRESET_ID.matcher(preset[0]).matches() ||
+            preset[1] == null || preset[1].trim().isEmpty() || preset[1].length() > 128 ||
+            preset[2] == null || preset[2].length() > 65536) return null;
+
+        return ENCODED_PRESET_MARKER+"|"+preset[0]+"|"+
+            encodePresetField(preset[1])+"|"+encodePresetField(preset[2]);
+    }
+
     static String[] parseCustomPresetEntry(String entry) {
         if (entry == null || entry.isEmpty()) return null;
 
@@ -173,6 +183,8 @@ public abstract class Box64PresetManager {
 
     public static void editPreset(Context context, String id, String name, EnvVars envVars) {
         if (context == null || name == null || name.trim().isEmpty() || name.length() > 128) return;
+        String serializedEnvVars = envVars != null ? envVars.toEscapedString() : "";
+        if (serializedEnvVars.length() > 65536) return;
         final String key = "box64_custom_presets";
         ArrayList<String[]> presets = customPresetsIterator(context);
         boolean updated = false;
@@ -182,7 +194,7 @@ public abstract class Box64PresetManager {
             for (String[] preset : presets) {
                 if (preset[0].equals(id)) {
                     preset[1] = name.trim();
-                    preset[2] = envVars != null ? envVars.toEscapedString() : "";
+                    preset[2] = serializedEnvVars;
                     updated = true;
                     break;
                 }
@@ -193,13 +205,14 @@ public abstract class Box64PresetManager {
             int nextId = getNextPresetId(context);
             if (nextId <= 0) return;
             presets.add(new String[]{Box64Preset.CUSTOM+"-"+nextId,
-                name.trim(), envVars != null ? envVars.toEscapedString() : ""});
+                name.trim(), serializedEnvVars});
         }
 
         ArrayList<String> encodedPresets = new ArrayList<>();
         for (String[] preset : presets) {
-            encodedPresets.add(ENCODED_PRESET_MARKER+"|"+preset[0]+"|"+
-                encodePresetField(preset[1])+"|"+encodePresetField(preset[2]));
+            String encoded = serializeCustomPresetEntry(preset);
+            if (encoded == null) return;
+            encodedPresets.add(encoded);
         }
         PreferenceManager.getDefaultSharedPreferences(context).edit()
             .putString(key, String.join(",", encodedPresets)).apply();
@@ -233,10 +246,15 @@ public abstract class Box64PresetManager {
     }
 
     public static void removePreset(Context context, String id) {
+        if (context == null || id == null || !CUSTOM_PRESET_ID.matcher(id).matches()) return;
         final String key = "box64_custom_presets";
         ArrayList<String> encodedPresets = new ArrayList<>();
         for (String[] preset : customPresetsIterator(context)) {
-            if (!preset[0].equals(id)) encodedPresets.add(preset[0]+"|"+preset[1]+"|"+preset[2]);
+            if (!preset[0].equals(id)) {
+                String encoded = serializeCustomPresetEntry(preset);
+                if (encoded == null) return;
+                encodedPresets.add(encoded);
+            }
         }
         PreferenceManager.getDefaultSharedPreferences(context).edit()
             .putString(key, String.join(",", encodedPresets)).apply();
