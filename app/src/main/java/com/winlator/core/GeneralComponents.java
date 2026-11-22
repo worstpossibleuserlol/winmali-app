@@ -434,7 +434,6 @@ public abstract class GeneralComponents {
                                 break;
                             }
                             File destination = new File(getComponentDir(type, activity), filename);
-                            if (destination.exists()) FileUtils.delete(destination);
                             if (ZipUtils.extract(source, destination)) loadSpinner(type, spinner, filename, defaultItem);
                             else AppUtils.showToast(activity, R.string.unable_to_import_component);
                         }
