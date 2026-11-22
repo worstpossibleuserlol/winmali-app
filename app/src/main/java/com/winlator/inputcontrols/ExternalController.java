@@ -74,10 +74,11 @@ public class ExternalController implements GamepadSlot {
     }
 
     public int getDeviceId() {
+        if (id == null || id.isEmpty()) return -1;
         if (this.deviceId == -1) {
             for (int deviceId : InputDevice.getDeviceIds()) {
                 InputDevice device = InputDevice.getDevice(deviceId);
-                if (device != null && device.getDescriptor().equals(id)) {
+                if (device != null && id.equals(device.getDescriptor())) {
                     this.deviceId = deviceId;
                     break;
                 }
@@ -87,9 +88,10 @@ public class ExternalController implements GamepadSlot {
     }
 
     public boolean isConnected() {
+        if (id == null || id.isEmpty()) return false;
         for (int deviceId : InputDevice.getDeviceIds()) {
             InputDevice device = InputDevice.getDevice(deviceId);
-            if (device != null && device.getDescriptor().equals(id)) return true;
+            if (device != null && id.equals(device.getDescriptor())) return true;
         }
         return false;
     }
@@ -106,7 +108,10 @@ public class ExternalController implements GamepadSlot {
     }
 
     public void addControllerBinding(ExternalControllerBinding controllerBinding) {
-        if (getControllerBinding(controllerBinding.getKeyCodeForAxis()) == null) controllerBindings.add(controllerBinding);
+        if (controllerBinding != null &&
+            getControllerBinding(controllerBinding.getKeyCodeForAxis()) == null) {
+            controllerBindings.add(controllerBinding);
+        }
     }
 
     public int getPosition(ExternalControllerBinding controllerBinding) {
@@ -141,7 +146,10 @@ public class ExternalController implements GamepadSlot {
 
     @Override
     public boolean equals(@Nullable Object obj) {
-        return obj instanceof ExternalController ? ((ExternalController)obj).id.equals(this.id) : super.equals(obj);
+        if (this == obj) return true;
+        if (!(obj instanceof ExternalController)) return false;
+        String otherId = ((ExternalController)obj).id;
+        return id != null && id.equals(otherId);
     }
 
     @Override
