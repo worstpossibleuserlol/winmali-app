@@ -78,7 +78,10 @@ public final class GpuCompatibilityProfile {
         boolean vulkan11 = isAtLeast(vulkanApiVersion, 1, 1);
         boolean vulkan12 = isAtLeast(vulkanApiVersion, 1, 2);
         boolean vulkan13 = isAtLeast(vulkanApiVersion, 1, 3);
-        boolean dxvk = vulkan11 && swapchain;
+        // The Vulkan version and swapchain extension alone are not enough to
+        // assume upstream DXVK is usable on Android Mali/unknown mobile drivers.
+        // Keep automatic DXVK selection to the known Adreno/Turnip path.
+        boolean dxvk = detected == Vendor.ADRENO && vulkan11 && swapchain;
 
         // VKD3D needs more than an API version. This conservative baseline
         // requires commonly needed extensions; it is reported but never auto-selected.
@@ -125,6 +128,29 @@ public final class GpuCompatibilityProfile {
 
             callback.call(resolve(renderer, vendor, apiVersion, extensions));
         });
+    }
+
+    /**
+     * Applies the automatic-profile safety fallback to an existing container.
+     * Explicit/manual choices are preserved when automatic GPU settings are off.
+     */
+    public static String resolveDXWrapperForLaunch(String selected, Vendor vendor,
+            boolean automaticSettings) {
+        String wrapper = DXWrappers.parseIdentifier(selected);
+        if (automaticSettings && vendor == Vendor.MALI && DXWrappers.DXVK.equals(wrapper)) {
+            return DXWrappers.WINED3D;
+        }
+        return wrapper;
+    }
+
+    public static String resolveVulkanDriverForLaunch(String selected, Vendor vendor,
+            boolean automaticSettings) {
+        String driver = GraphicsDrivers.isVulkanDriver(selected) ?
+            selected : GraphicsDrivers.DEFAULT_VULKAN_DRIVER;
+        if (automaticSettings && vendor == Vendor.MALI && GraphicsDrivers.TURNIP.equals(driver)) {
+            return GraphicsDrivers.VORTEK;
+        }
+        return driver;
     }
 
     public String getVendorLabel() {
