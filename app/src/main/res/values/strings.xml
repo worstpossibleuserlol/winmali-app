@@ -24,6 +24,7 @@
     <string name="container_create_storage_error">WinMali could not create or save the container folder. Check available storage and app file access.</string>
     <string name="container_create_invalid_settings">The container settings are invalid. Reopen the editor and try again.</string>
     <string name="container_create_config_failed">WinMali could not save the container configuration. Check available storage.</string>
+    <string name="unable_to_save_container_settings">Unable to save container settings. Check available storage and try again.</string>
     <string name="container_create_destination_exists">The target container folder already exists. Refresh the container list and try again.</string>
     <string name="container_create_unexpected_error">Container creation stopped because of an unexpected error. Check Session Logs for details.</string>
     <string name="removing_container">Removing Container...</string>
