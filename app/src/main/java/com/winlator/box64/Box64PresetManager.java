@@ -165,11 +165,10 @@ public abstract class Box64PresetManager {
             catch (NumberFormatException ignored) {}
         }
 
-        // Reuse the first free valid ID rather than wrapping to an existing ID.
-        for (int candidate = 1; candidate <= 999999999; candidate++) {
-            if (!usedIds.contains(candidate)) return candidate;
-        }
-        return -1;
+        // By the pigeonhole principle, among N stored IDs one of 1..N+1 is free.
+        int candidate = 1;
+        while (candidate <= usedIds.size() + 1 && usedIds.contains(candidate)) candidate++;
+        return candidate <= 999999999 ? candidate : -1;
     }
 
     public static void editPreset(Context context, String id, String name, EnvVars envVars) {

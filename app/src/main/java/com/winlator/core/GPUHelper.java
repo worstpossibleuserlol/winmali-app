@@ -144,10 +144,22 @@ public abstract class GPUHelper {
         }
         finally {
             if (egl != null && display != EGL10.EGL_NO_DISPLAY) {
-                egl.eglMakeCurrent(display, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_CONTEXT);
-                if (surface != EGL10.EGL_NO_SURFACE) egl.eglDestroySurface(display, surface);
-                if (eglContext != EGL10.EGL_NO_CONTEXT) egl.eglDestroyContext(display, eglContext);
-                if (initialized) egl.eglTerminate(display);
+                try {
+                    egl.eglMakeCurrent(display, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_CONTEXT);
+                }
+                catch (RuntimeException ignored) {}
+                if (surface != EGL10.EGL_NO_SURFACE) {
+                    try { egl.eglDestroySurface(display, surface); }
+                    catch (RuntimeException ignored) {}
+                }
+                if (eglContext != EGL10.EGL_NO_CONTEXT) {
+                    try { egl.eglDestroyContext(display, eglContext); }
+                    catch (RuntimeException ignored) {}
+                }
+                if (initialized) {
+                    try { egl.eglTerminate(display); }
+                    catch (RuntimeException ignored) {}
+                }
             }
         }
         return info;

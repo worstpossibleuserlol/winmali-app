@@ -35,6 +35,7 @@ public abstract class GraphicsDrivers {
     }
 
     public static boolean isMaliGPU(Context context) {
+        if (context == null) return false;
         String renderer = GPUHelper.glGetRenderer(context).toLowerCase(java.util.Locale.ENGLISH);
         String vendor = GPUHelper.glGetVendor(context).toLowerCase(java.util.Locale.ENGLISH);
         return renderer.contains("mali") || vendor.contains("arm");
@@ -52,7 +53,7 @@ public abstract class GraphicsDrivers {
     }
 
     public static boolean supportsTurnip(Context context) {
-        return GPUHelper.getAdrenoModelId(context) > 0;
+        return context != null && GPUHelper.getAdrenoModelId(context) > 0;
     }
 
     public static String[] getItems(String apiName, Context context) {
@@ -107,6 +108,8 @@ public abstract class GraphicsDrivers {
     }
 
     public static String getDefaultDriver(Context context) {
-        return GPUHelper.getAdrenoModelId(context) > 0 ? GraphicsDrivers.TURNIP+","+GraphicsDrivers.DEFAULT_OPENGL_DRIVER : GraphicsDrivers.VORTEK+","+GraphicsDrivers.DEFAULT_OPENGL_DRIVER;
+        return context != null && GPUHelper.getAdrenoModelId(context) > 0 ?
+            GraphicsDrivers.TURNIP+","+GraphicsDrivers.DEFAULT_OPENGL_DRIVER :
+            GraphicsDrivers.VORTEK+","+GraphicsDrivers.DEFAULT_OPENGL_DRIVER;
     }
 }
