@@ -120,8 +120,21 @@ public class WineInstallerTest {
         assertTrue("version identifier should be accepted", CompatibilityRuntimePackage.isValidVersionName("10.10"));
         assertEquals("usr/bin/custom-wine",
             CompatibilityRuntimePackage.normalizeRelativePath("usr/bin/custom-wine"));
-        CompatibilityRuntimeManifest directlyParsed = CompatibilityRuntimeManifest.parse(
-            new org.json.JSONObject(manifest));
+        org.json.JSONObject manifestJson = new org.json.JSONObject(manifest);
+        assertEquals("WINE", manifestJson.optString("engine", ""));
+        assertEquals("arm64-v8a", manifestJson.optString("hostAbi", ""));
+        assertTrue("host ABI should be accepted",
+            CompatibilityRuntimeManifest.isSupportedHostAbi(manifestJson.optString("hostAbi", "")));
+        assertEquals(2, manifestJson.optJSONArray("guestArchitectures").length());
+        assertTrue("guest architecture list should be accepted",
+            CompatibilityRuntimeManifest.parseGuestArchitectures(new String[]{"x86", "x86_64"}, false) != null);
+        assertEquals("lib/wine",
+            CompatibilityRuntimePackage.normalizeRelativePath(manifestJson.optString("wineLibraryRoot", "")));
+        assertEquals(manifestJson.optString("entrypoint", ""),
+            manifestJson.optString("wineExecutable", ""));
+        assertEquals(CompatibilityRuntimeManifest.Engine.WINE,
+            CompatibilityRuntimeManifest.Engine.valueOf(manifestJson.optString("engine", "")));
+        CompatibilityRuntimeManifest directlyParsed = CompatibilityRuntimeManifest.parse(manifestJson);
         assertTrue("manifest JSON should parse", directlyParsed != null);
         CompatibilityRuntimeManifest parsed = CompatibilityRuntimeManifest.read(root);
         assertTrue("manifest file should be read and parsed", parsed != null);
