@@ -1,6 +1,7 @@
 package com.winlator;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -46,6 +47,7 @@ import com.winlator.contentdialog.SoundFontTestDialog;
 import com.winlator.core.AppUtils;
 import com.winlator.core.ArrayUtils;
 import com.winlator.core.Callback;
+import com.winlator.core.CompatibilityRuntimeCatalog;
 import com.winlator.core.DefaultVersion;
 import com.winlator.core.FileUtils;
 import com.winlator.core.GPUHelper;
@@ -123,6 +125,7 @@ public class SettingsFragment extends Fragment {
         preferences = PreferenceManager.getDefaultSharedPreferences(context);
 
         view.findViewById(R.id.BTGPUDiagnostics).setOnClickListener((v) -> showGPUDiagnostics(context));
+        view.findViewById(R.id.BTCompatibilityRuntimeBundle).setOnClickListener((v) -> showCompatibilityRuntimeBundle(context));
 
         final Spinner sSoundFont = view.findViewById(R.id.SSoundFont);
         String soundfont = preferences.getString("soundfont", null);
@@ -468,6 +471,29 @@ public class SettingsFragment extends Fragment {
 
         dialog.setOnConfirmCallback(() -> installWine(wineInfo));
         dialog.show();
+    }
+
+    private void showCompatibilityRuntimeBundle(Context context) {
+        StringBuilder details = new StringBuilder();
+        details.append("Upstream release references (snapshot ")
+            .append(CompatibilityRuntimeCatalog.SNAPSHOT_DATE).append("):\\n\\n");
+        for (CompatibilityRuntimeCatalog.Release release : CompatibilityRuntimeCatalog.getReleases()) {
+            details.append(release.getTitle()).append("\\n")
+                .append(release.note).append("\\n\\n");
+        }
+        details.append(CompatibilityRuntimeCatalog.getArchitectureExplanation())
+            .append("\\n\\n")
+            .append("Import an Android/AArch64 Wine build with the existing Wine installer. ")
+            .append("A winmali-runtime.json manifest can declare and validate x86, x86_64, and verified ARM64EC guest libraries. ")
+            .append("Proton is listed for tracking, but this 2.0.0 beta does not yet include an Android Proton session launcher; ")
+            .append("desktop Proton archives are not Android-compatible.");
+
+        new AlertDialog.Builder(context)
+            .setTitle(R.string.compatibility_runtime_bundle)
+            .setMessage(details.toString())
+            .setPositiveButton("Import Wine build", (dialog, which) -> selectWineFileForInstall())
+            .setNegativeButton(android.R.string.ok, null)
+            .show();
     }
 
     private void showGPUDiagnostics(Context context) {
