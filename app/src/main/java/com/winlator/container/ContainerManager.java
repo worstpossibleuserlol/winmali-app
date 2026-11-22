@@ -89,7 +89,11 @@ public class ContainerManager {
                 Container container = new Container(id);
                 container.setRootDir(file);
                 File configFile = container.getConfigFile();
-                if (FileUtils.isSymlink(configFile) || !configFile.isFile()) continue;
+                File winePrefix = new File(file, ".wine");
+                File windowsDir = new File(winePrefix, "drive_c/windows");
+                if (FileUtils.isSymlink(configFile) || !configFile.isFile() ||
+                    !winePrefix.isDirectory() || FileUtils.isSymlink(winePrefix) ||
+                    !windowsDir.isDirectory() || FileUtils.isSymlink(windowsDir)) continue;
 
                 JSONObject data = new JSONObject(FileUtils.readString(configFile));
                 container.loadData(data);
@@ -227,27 +231,40 @@ public class ContainerManager {
 
     public void importContainerAsync(Uri sourceUri, Callback<Container> callback) {
         final Handler handler = new Handler(context.getMainLooper());
-        OPERATIONS.execute(() -> {
-            Container imported = null;
-            File staging = null;
-            try {
-                TarCompressorUtils.Type type = TarCompressorUtils.detectType(context, sourceUri);
-                if (type != null) {
-                    staging = new File(context.getCacheDir(), "winmali-import-"+UUID.randomUUID());
-                    if (staging.mkdirs() && TarCompressorUtils.extract(type, context, sourceUri, staging)) {
-                        File backupRoot = findBackupRoot(staging, 8);
-                        if (backupRoot != null) imported = installImportedContainer(backupRoot);
+        if (sourceUri == null) {
+            if (callback != null) handler.post(() -> callback.call(null));
+            return;
+        }
+
+        // Imports depend on the app-level Wine runtime and system assets too.
+        RootFSInstaller.ensureInstalled(context, (systemFilesReady) -> {
+            if (!systemFilesReady) {
+                if (callback != null) handler.post(() -> callback.call(null));
+                return;
+            }
+
+            OPERATIONS.execute(() -> {
+                Container imported = null;
+                File staging = null;
+                try {
+                    TarCompressorUtils.Type type = TarCompressorUtils.detectType(context, sourceUri);
+                    if (type != null) {
+                        staging = new File(context.getCacheDir(), "winmali-import-"+UUID.randomUUID());
+                        if (staging.mkdirs() && TarCompressorUtils.extract(type, context, sourceUri, staging)) {
+                            File backupRoot = findBackupRoot(staging, 8);
+                            if (backupRoot != null) imported = installImportedContainer(backupRoot);
+                        }
                     }
                 }
-            }
-            catch (Exception ignored) {
-                imported = null;
-            }
-            finally {
-                if (staging != null) FileUtils.delete(staging);
-            }
-            final Container result = imported;
-            if (callback != null) handler.post(() -> callback.call(result));
+                catch (Exception error) {
+                    android.util.Log.e("WinMali-Containers", "Container import failed", error);
+                }
+                finally {
+                    if (staging != null) FileUtils.delete(staging);
+                }
+                final Container result = imported;
+                if (callback != null) handler.post(() -> callback.call(result));
+            });
         });
     }
 
@@ -277,13 +294,22 @@ public class ContainerManager {
             Container container = new Container(nextAvailableContainerId());
             container.loadData(data);
 
-            if (!WineInfo.isMainWineVersion(container.getWineVersion())) {
+            if (WineInfo.isMainWineVersion(container.getWineVersion())) {
+                if (!validateMainWineFiles(RootFS.find(context))) return null;
+            }
+            else {
                 WineInfo info = WineInfo.fromIdentifier(context, container.getWineVersion());
                 File installedWineDir = RootFS.find(context).getInstalledWineDir();
                 File runtime = new File(installedWineDir, container.getWineVersion());
                 File pattern = new File(installedWineDir, "container-pattern-"+info.fullVersion()+".tzst");
+                File bin = new File(runtime, "bin");
+                File wine = new File(bin, "wine");
+                File wine64 = new File(bin, "wine64");
+                boolean hasArm64Wine = CompatibilityRuntimePackage.isAarch64Elf(wine) ||
+                    CompatibilityRuntimePackage.isAarch64Elf(wine64);
                 if (info.path == null || !info.identifier().equals(container.getWineVersion()) ||
-                    !runtime.isDirectory() || !pattern.isFile()) return null;
+                    !runtime.isDirectory() || (!wine.isFile() && !wine64.isFile()) ||
+                    !hasArm64Wine || !pattern.isFile() || pattern.length() == 0) return null;
             }
 
             File destination = new File(homeDir, RootFS.USER+"-"+container.id);
