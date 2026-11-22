@@ -7,6 +7,7 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -63,7 +64,7 @@ public class WineInstallerTest {
         assertTrue(FileUtils.symlink("preinstall/container-pattern", home.getPath()));
 
         assertTrue(WineInstaller.restoreHomeLink(home, false, null));
-        assertNull(FileUtils.readSymlink(home));
+        assertEquals("", FileUtils.readSymlink(home));
         assertFalse(home.exists());
     }
 
