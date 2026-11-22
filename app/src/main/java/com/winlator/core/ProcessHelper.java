@@ -15,7 +15,6 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.lang.reflect.Field;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -71,11 +70,16 @@ public abstract class ProcessHelper {
     }
 
     public static int exec(String command, EnvVars envVars, File workingDir, Callback<Integer> terminationCallback) {
+        return exec(command, envVars, workingDir, null, terminationCallback);
+    }
+
+    public static int exec(String command, EnvVars envVars, File workingDir,
+            Callback<String> outputCallback, Callback<Integer> terminationCallback) {
         try {
             String[] arguments = splitCommand(command);
             if (arguments.length == 0) return -1;
 
-            boolean captureOutput = hasDebugCallbacks();
+            boolean captureOutput = outputCallback != null || hasDebugCallbacks();
             ProcessBuilder processBuilder = new ProcessBuilder(arguments).directory(workingDir);
             if (!captureOutput) processBuilder.redirectOutput(new File("/dev/null")).redirectErrorStream(true);
 
@@ -92,34 +96,26 @@ public abstract class ProcessHelper {
             }
 
             if (captureOutput) {
-                createDebugThread(process.getInputStream());
-                createDebugThread(process.getErrorStream());
+                createDebugThread(process.getInputStream(), outputCallback);
+                createDebugThread(process.getErrorStream(), outputCallback);
             }
             if (terminationCallback != null) createWaitForThread(process, terminationCallback);
-            return (int)processId;
+            return processId;
         }
-        catch (Exception e) {
+        catch (Exception error) {
+            android.util.Log.e("WinMali-Process", "Unable to start guest process", error);
             return -1;
         }
     }
 
     private static int getProcessId(java.lang.Process process) {
-        Class<?> processClass = process.getClass();
-        while (processClass != null) {
-            try {
-                Field pidField = processClass.getDeclaredField("pid");
-                pidField.setAccessible(true);
-                int pid = pidField.getInt(process);
-                return pid > 0 ? pid : -1;
-            }
-            catch (NoSuchFieldException e) {
-                processClass = processClass.getSuperclass();
-            }
-            catch (ReflectiveOperationException | RuntimeException e) {
-                return -1;
-            }
+        try {
+            long pid = process.pid();
+            return pid > 0 && pid <= Integer.MAX_VALUE ? (int)pid : -1;
         }
-        return -1;
+        catch (UnsupportedOperationException | SecurityException error) {
+            return -1;
+        }
     }
 
     private static boolean hasDebugCallbacks() {
@@ -128,24 +124,33 @@ public abstract class ProcessHelper {
         }
     }
 
-    private static void createDebugThread(final InputStream inputStream) {
+    private static void createDebugThread(final InputStream inputStream,
+            final Callback<String> outputCallback) {
         Thread worker = new Thread(() -> {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    ArrayList<Callback<String>> callbacks;
-                    synchronized (debugCallbacks) {
-                        callbacks = new ArrayList<>(debugCallbacks);
+                    if (outputCallback != null) {
+                        try {
+                            outputCallback.call(line);
+                        }
+                        catch (RuntimeException error) {
+                            android.util.Log.w("WinMali-Process", "Process output callback failed", error);
+                        }
                     }
-                    if (!callbacks.isEmpty()) {
+                    else {
+                        ArrayList<Callback<String>> callbacks;
+                        synchronized (debugCallbacks) {
+                            callbacks = new ArrayList<>(debugCallbacks);
+                        }
                         for (Callback<String> callback : callbacks) {
                             try {
                                 callback.call(line);
                             }
                             catch (RuntimeException ignored) {}
                         }
+                        if (callbacks.isEmpty() && MainActivity.DEBUG_MODE) System.out.println(line);
                     }
-                    else if (MainActivity.DEBUG_MODE) System.out.println(line);
                 }
             }
             catch (IOException ignored) {}
@@ -416,7 +421,8 @@ public abstract class ProcessHelper {
         for (PStat process : descendants) {
             process.name = getProcessName(process.pid);
             if (process.name.isEmpty()) process.name = process.shortName;
-            process.guestProcess = process.name.contains("wine") || process.name.contains(".exe");
+            String normalizedName = process.name.toLowerCase(java.util.Locale.ENGLISH);
+            process.guestProcess = normalizedName.contains("wine") || normalizedName.contains(".exe");
         }
         return descendants;
     }

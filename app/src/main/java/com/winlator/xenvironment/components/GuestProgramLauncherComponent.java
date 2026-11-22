@@ -28,11 +28,13 @@ import java.util.List;
 
 public class GuestProgramLauncherComponent extends EnvironmentComponent {
     private String guestExecutable;
-    private static int pid = -1;
+    private int pid = -1;
     private EnvVars envVars;
     private String box64Preset = Box64Preset.CONSERVATIVE;
     private Callback<Integer> terminationCallback;
-    private static final Object lock = new Object();
+    private Callback<String> outputCallback;
+    private final Object lock = new Object();
+    private long processGeneration = 0;
 
     @Override
     public void start() {
@@ -59,7 +61,8 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
     @Override
     public void stop() {
         synchronized (lock) {
-            if (pid != -1) {
+            processGeneration++;
+            if (pid > 0) {
                 Process.killProcess(pid);
                 pid = -1;
             }
@@ -72,6 +75,10 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
     public void setTerminationCallback(Callback<Integer> terminationCallback) {
         this.terminationCallback = terminationCallback;
+    }
+
+    public void setOutputCallback(Callback<String> outputCallback) {
+        this.outputCallback = outputCallback;
     }
 
     public String getGuestExecutable() {
@@ -99,6 +106,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
     }
 
     private int execGuestProgram() {
+        final long generation = ++processGeneration;
         RootFS rootFS = environment.getRootFS();
         File rootDir = rootFS.getRootDir();
 
@@ -122,9 +130,9 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
         String command = rootDir+"/usr/local/bin/box64 "+guestExecutable;
 
-        return ProcessHelper.exec(command, envVars, rootDir, (status) -> {
+        return ProcessHelper.exec(command, envVars, rootDir, outputCallback, (status) -> {
             synchronized (lock) {
-                pid = -1;
+                if (processGeneration == generation) pid = -1;
             }
             if (terminationCallback != null) terminationCallback.call(status);
         });

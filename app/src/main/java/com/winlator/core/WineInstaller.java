@@ -143,7 +143,8 @@ public abstract class WineInstaller {
     }
 
     public static void findWineVersionAsync(Context context, File wineDir, Callback<WineInfo> callback) {
-        if (wineDir == null || !wineDir.isDirectory()) {
+        if (callback == null) return;
+        if (context == null || wineDir == null || !wineDir.isDirectory()) {
             callback.call(null);
             return;
         }
@@ -165,30 +166,40 @@ public abstract class WineInstaller {
         final String winePath = wineDir.getPath();
 
         final AtomicReference<WineInfo> wineInfoRef = new AtomicReference<>();
-        Callback<String> debugCallback = (line) -> {
+        Callback<String> outputCallback = (line) -> {
             Pattern pattern = Pattern.compile("^wine\\-([0-9\\.]+)\\-?([0-9\\.]+)?", Pattern.CASE_INSENSITIVE);
             Matcher matcher = pattern.matcher(line);
             if (matcher.find()) {
                 String version = matcher.group(1);
-                String subversion = matcher.groupCount() >= 2 ? matcher.group(2) : null;
+                String subversion = matcher.group(2);
                 wineInfoRef.set(new WineInfo(version, subversion, winePath));
             }
         };
 
-        ProcessHelper.addDebugCallback(debugCallback);
-
         File linkFile = new File(rootDir, RootFS.HOME_PATH);
-        linkFile.delete();
-        FileUtils.symlink(wineDir, linkFile);
+        boolean hadOriginalSymlink = FileUtils.isSymlink(linkFile);
+        String originalTarget = hadOriginalSymlink ? FileUtils.readSymlink(linkFile) : null;
+        if (!hadOriginalSymlink && (linkFile.exists() || !linkFile.getParentFile().isDirectory())) {
+            callback.call(null);
+            return;
+        }
+        if (!FileUtils.symlink(wineDir, linkFile)) {
+            callback.call(null);
+            return;
+        }
 
         XEnvironment environment = new XEnvironment(context, rootFS);
-        GuestProgramLauncherComponent guestProgramLauncherComponent = new GuestProgramLauncherComponent();
-        guestProgramLauncherComponent.setGuestExecutable(wineBinPath+" --version");
-        guestProgramLauncherComponent.setTerminationCallback((status) -> {
-            callback.call(wineInfoRef.get());
-            ProcessHelper.removeDebugCallback(debugCallback);
+        GuestProgramLauncherComponent launcher = new GuestProgramLauncherComponent();
+        launcher.setOutputCallback(outputCallback);
+        launcher.setGuestExecutable(wineBinPath+" --version");
+        launcher.setTerminationCallback((status) -> {
+            if (hadOriginalSymlink && originalTarget != null && !originalTarget.isEmpty()) {
+                FileUtils.symlink(originalTarget, linkFile);
+            }
+            else FileUtils.delete(linkFile);
+            callback.call(status == 0 ? wineInfoRef.get() : null);
         });
-        environment.addComponent(guestProgramLauncherComponent);
+        environment.addComponent(launcher);
         environment.startEnvironmentComponents();
     }
 
