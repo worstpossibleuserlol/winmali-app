@@ -15,6 +15,7 @@ public abstract class GraphicsDrivers {
     public static final String DEFAULT_OPENGL_DRIVER = GLADIO;
 
     public static String getName(String identifier) {
+        if (identifier == null) return "None";
         switch (identifier) {
             case TURNIP: return "Turnip";
             case VORTEK: return "Vortek";
@@ -40,6 +41,7 @@ public abstract class GraphicsDrivers {
     }
 
     public static String[] getItems(String apiName) {
+        if (apiName == null) return new String[0];
         if (apiName.equalsIgnoreCase("VULKAN")) {
             return new String[]{getName(TURNIP), getName(VORTEK)};
         }
@@ -54,6 +56,7 @@ public abstract class GraphicsDrivers {
     }
 
     public static String[] getItems(String apiName, Context context) {
+        if (apiName == null) return new String[0];
         if (apiName.equalsIgnoreCase("VULKAN") && !supportsTurnip(context)) {
             // Unknown and Mali GPUs must not be treated as Turnip-compatible.
             return new String[]{getName(VORTEK)};
