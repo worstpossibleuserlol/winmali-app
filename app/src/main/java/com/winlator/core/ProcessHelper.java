@@ -98,11 +98,15 @@ public abstract class ProcessHelper {
                 return -1;
             }
 
+            Thread stdoutWorker = null;
+            Thread stderrWorker = null;
             if (captureOutput) {
-                createDebugThread(process.getInputStream(), outputCallback);
-                createDebugThread(process.getErrorStream(), outputCallback);
+                stdoutWorker = createDebugThread(process.getInputStream(), outputCallback);
+                stderrWorker = createDebugThread(process.getErrorStream(), outputCallback);
             }
-            if (terminationCallback != null) createWaitForThread(process, terminationCallback);
+            if (terminationCallback != null) {
+                createWaitForThread(process, stdoutWorker, stderrWorker, terminationCallback);
+            }
             return processId;
         }
         catch (Exception error) {
@@ -153,7 +157,7 @@ public abstract class ProcessHelper {
         }
     }
 
-    private static void createDebugThread(final InputStream inputStream,
+    private static Thread createDebugThread(final InputStream inputStream,
             final Callback<String> outputCallback) {
         Thread worker = new Thread(() -> {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
@@ -186,17 +190,29 @@ public abstract class ProcessHelper {
         }, "WinMali-process-output");
         worker.setDaemon(true);
         worker.start();
+        return worker;
     }
 
-    private static void createWaitForThread(java.lang.Process process, final Callback<Integer> terminationCallback) {
+    private static void createWaitForThread(java.lang.Process process, Thread stdoutWorker,
+            Thread stderrWorker, final Callback<Integer> terminationCallback) {
         Thread worker = new Thread(() -> {
             try {
-                terminationCallback.call(process.waitFor());
+                int exitCode = process.waitFor();
+
+                // Drain short-lived stdout/stderr readers before notifying consumers.
+                // Wine --version output is small, but the reader can otherwise lose a
+                // race against waitFor() and report a null version intermittently.
+                if (stdoutWorker != null) stdoutWorker.join(2500);
+                if (stderrWorker != null) stderrWorker.join(2500);
+
+                terminationCallback.call(exitCode);
             }
-            catch (InterruptedException e) {
+            catch (InterruptedException error) {
                 Thread.currentThread().interrupt();
             }
-            catch (RuntimeException ignored) {}
+            catch (RuntimeException error) {
+                android.util.Log.w("WinMali-Process", "Process termination callback failed", error);
+            }
         }, "WinMali-process-wait");
         worker.setDaemon(true);
         worker.start();
