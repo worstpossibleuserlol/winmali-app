@@ -131,7 +131,11 @@ public abstract class FileUtils {
             return isSymlink(destination);
         }
         catch (IOException | RuntimeException error) {
-            android.util.Log.w("WinMali-FileUtils", "Unable to atomically replace symlink: "+destination, error);
+            // Logging must never turn an expected filesystem failure into another failure.
+            try {
+                android.util.Log.w("WinMali-FileUtils", "Unable to atomically replace symlink: "+destination, error);
+            }
+            catch (RuntimeException ignored) {}
             return false;
         }
         finally {
