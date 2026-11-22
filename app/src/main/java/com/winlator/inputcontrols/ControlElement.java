@@ -743,7 +743,11 @@ public class ControlElement {
                         startAngle = endAngle;
                     }
 
-                    drawIcon(canvas, cx, cy, boundingBox.width() * 0.4f, boundingBox.width() * 0.4f, 17, false);
+                    Bitmap radialIcon = inputControlsView.getIcon((byte)17);
+                    if (radialIcon != null && !radialIcon.isRecycled()) {
+                        drawIcon(canvas, cx, cy, boundingBox.width() * 0.4f,
+                            boundingBox.width() * 0.4f, radialIcon, false);
+                    }
                 }
                 else {
                     paint.setStyle(Paint.Style.FILL_AND_STROKE);
