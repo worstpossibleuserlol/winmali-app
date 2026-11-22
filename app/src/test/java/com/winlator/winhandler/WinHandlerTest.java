@@ -16,7 +16,9 @@ public class WinHandlerTest {
     @Test
     public void failedSocketBindLeavesHandlerStopped() throws Exception {
         try (DatagramSocket blocker = new DatagramSocket(null)) {
-            blocker.setReuseAddress(true);
+            // Do not enable SO_REUSEADDR: the handler's listener must not
+            // be able to share this port with an already-bound process.
+            blocker.setReuseAddress(false);
             blocker.bind(new InetSocketAddress(7947));
 
             WinHandler handler = new WinHandler(null);
