@@ -2,6 +2,7 @@ package com.winlator.core;
 
 import com.winlator.container.DXWrappers;
 import com.winlator.container.GraphicsDrivers;
+import com.winlator.container.Container;
 
 import org.junit.Test;
 
@@ -10,6 +11,11 @@ import static org.junit.Assert.*;
 public class GpuCompatibilityProfileTest {
     private static int vk(int major, int minor, int patch) {
         return (major << 22) | (minor << 12) | patch;
+    }
+
+    @Test
+    public void newContainersUseTheConservativeWineD3DDefault() {
+        assertEquals(DXWrappers.WINED3D, Container.DEFAULT_DXWRAPPER);
     }
 
     @Test
