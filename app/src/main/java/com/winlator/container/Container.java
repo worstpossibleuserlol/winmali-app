@@ -19,6 +19,7 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.Iterator;
+import java.util.NoSuchElementException;
 
 public class Container {
     public static final String DEFAULT_ENV_VARS = "ZINK_DESCRIPTORS=lazy ZINK_DEBUG=compact MESA_SHADER_CACHE_DISABLE=false MESA_SHADER_CACHE_MAX_SIZE=512MB mesa_glthread=true WINEESYNC=1 TU_DEBUG=noconform";
@@ -64,7 +65,7 @@ public class Container {
     }
 
     public void setName(String name) {
-        this.name = name;
+        this.name = name != null && !name.trim().isEmpty() ? name.trim() : "Container-"+id;
     }
 
     public String getScreenSize() {
@@ -144,7 +145,7 @@ public class Container {
     }
 
     public void setDrives(String drives) {
-        this.drives = drives;
+        this.drives = drives != null ? drives : "";
     }
 
     public byte getHUDMode() {
@@ -152,7 +153,9 @@ public class Container {
     }
 
     public void setHUDMode(byte hudMode) {
-        this.hudMode = hudMode;
+        int modeCount = FrameRating.Mode.values().length;
+        this.hudMode = hudMode >= 0 && hudMode < modeCount ?
+            hudMode : (byte)FrameRating.Mode.DISABLED.ordinal();
     }
 
     public byte getStartupSelection() {
@@ -160,7 +163,9 @@ public class Container {
     }
 
     public void setStartupSelection(byte startupSelection) {
-        this.startupSelection = startupSelection;
+        this.startupSelection = startupSelection >= STARTUP_SELECTION_NORMAL &&
+            startupSelection <= STARTUP_SELECTION_AGGRESSIVE ?
+            startupSelection : STARTUP_SELECTION_ESSENTIAL;
     }
 
     public String getCPUList() {
@@ -267,20 +272,39 @@ public class Container {
         return drivesIterator(drives);
     }
 
-    public static Iterable<Drive> drivesIterator(final String drives) {
-        final int[] index = {drives.indexOf(":")};
+    private static int findNextDriveColon(String drives, int start) {
+        int colon = drives.indexOf(":", Math.max(0, start));
+        while (colon != -1) {
+            if (colon > 0) {
+                char driveLetter = Character.toUpperCase(drives.charAt(colon - 1));
+                if (driveLetter >= 'A' && driveLetter <= 'Z') return colon;
+            }
+            colon = drives.indexOf(":", colon + 1);
+        }
+        return -1;
+    }
+
+    public static Iterable<Drive> drivesIterator(final String drivesValue) {
+        final String drives = drivesValue != null ? drivesValue : "";
         return () -> new Iterator<Drive>() {
+            private int index = findNextDriveColon(drives, 0);
+
             @Override
             public boolean hasNext() {
-                return index[0] != -1;
+                return index != -1;
             }
 
             @Override
             public Drive next() {
-                String letter = String.valueOf(drives.charAt(index[0]-1));
-                int nextIndex = drives.indexOf(":", index[0]+1);
-                String path = drives.substring(index[0]+1, nextIndex != -1 ? nextIndex-1 : drives.length());
-                index[0] = nextIndex;
+                if (index == -1) throw new NoSuchElementException();
+                int currentIndex = index;
+                int nextIndex = findNextDriveColon(drives, currentIndex + 1);
+                int pathEnd = nextIndex != -1 ? nextIndex - 1 : drives.length();
+                if (pathEnd < currentIndex + 1) pathEnd = currentIndex + 1;
+
+                String letter = String.valueOf(drives.charAt(currentIndex - 1));
+                String path = drives.substring(currentIndex + 1, pathEnd);
+                index = nextIndex;
                 return new Drive(letter, path);
             }
         };
