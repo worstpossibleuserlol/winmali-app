@@ -27,9 +27,9 @@ public class WinHandlerTest {
             // Do not enable SO_REUSEADDR: the handler's listener must not
             // be able to share this port with an already-bound process.
             blocker.setReuseAddress(false);
-            blocker.bind(new InetSocketAddress(7947));
+            blocker.bind(new InetSocketAddress(0));
 
-            WinHandler handler = new WinHandler(null);
+            WinHandler handler = new WinHandler(null, blocker.getLocalPort());
             try {
                 assertFalse("start must fail when the UDP port is already occupied", handler.start());
 
@@ -45,7 +45,7 @@ public class WinHandlerTest {
     }
     @Test
     public void fullProcessMessageIsParsedAfterOneByteInitHandshake() throws Exception {
-        WinHandler handler = new WinHandler(null);
+        WinHandler handler = new WinHandler(null, 0);
         CountDownLatch processReceived = new CountDownLatch(1);
         AtomicReference<ProcessInfo> processInfo = new AtomicReference<>();
         handler.setOnGetProcessInfoListener((index, count, info) -> {
@@ -55,10 +55,12 @@ public class WinHandlerTest {
 
         try (DatagramSocket sender = new DatagramSocket()) {
             assertTrue("WinHandler should bind before start returns", handler.start());
+            int serverPort = handler.getBoundPort();
+            assertTrue("WinHandler should expose its bound ephemeral port", serverPort > 0);
             InetAddress loopback = InetAddress.getByName("127.0.0.1");
 
             byte[] init = new byte[]{RequestCodes.INIT};
-            sender.send(new DatagramPacket(init, init.length, loopback, 7947));
+            sender.send(new DatagramPacket(init, init.length, loopback, serverPort));
 
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
             while (!handler.initReceived && System.nanoTime() < deadline) {
@@ -83,7 +85,7 @@ public class WinHandlerTest {
             message.put(name);
 
             byte[] request = message.array();
-            sender.send(new DatagramPacket(request, request.length, loopback, 7947));
+            sender.send(new DatagramPacket(request, request.length, loopback, serverPort));
 
             assertTrue("full GET_PROCESS message should be parsed after INIT",
                 processReceived.await(2, TimeUnit.SECONDS));
