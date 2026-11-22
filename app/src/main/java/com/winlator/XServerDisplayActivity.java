@@ -272,12 +272,25 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         setupUI();
 
         Executors.newSingleThreadExecutor().execute(() -> {
+            boolean systemFilesReady = true;
             if (!isGenerateWineprefix()) {
-                setupWineSystemFiles();
-                extractGraphicsDriverFiles();
-                changeWineAudioDriver();
+                systemFilesReady = setupWineSystemFiles();
+                if (systemFilesReady) {
+                    extractGraphicsDriverFiles();
+                    changeWineAudioDriver();
+                }
             }
-            setupXEnvironment();
+
+            if (systemFilesReady) {
+                setupXEnvironment();
+            }
+            else {
+                runOnUiThread(() -> {
+                    preloaderDialog.closeOnUiThread();
+                    AppUtils.showToast(this, R.string.unable_to_install_system_files);
+                    finish();
+                });
+            }
         });
     }
 
@@ -447,7 +460,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         ForegroundService.stopSession(this);
     }
 
-    private void setupWineSystemFiles() {
+    private boolean setupWineSystemFiles() {
         String appVersion = String.valueOf(AppUtils.getVersionCode(this));
         String rfsVersion = String.valueOf(rootFS.getVersion());
         boolean containerDataChanged = false;
@@ -495,6 +508,41 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         if (containerDataChanged) container.saveData();
+        return ensureFileManagerInstalled();
+    }
+
+    /**
+     * The file-manager binaries are shipped in rootfs_patches.tzst. Older or
+     * partially patched prefixes may have an up-to-date appVersion marker but
+     * still lack these files, so validate and repair them on every container
+     * startup before launching winhandler.exe.
+     */
+    private boolean ensureFileManagerInstalled() {
+        File windowsDir = new File(rootFS.getRootDir(),
+            RootFS.WINEPREFIX+"/drive_c/windows");
+        File fileManager = new File(windowsDir, "wfm.exe");
+        File processHandler = new File(windowsDir, "winhandler.exe");
+
+        if (isNonEmptyFile(fileManager) && isNonEmptyFile(processHandler)) return true;
+
+        android.util.Log.w("WinMali-FileManager",
+            "Container file manager files are missing; restoring rootfs patches");
+        boolean extracted = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD,
+            this, "rootfs_patches.tzst", rootFS.getRootDir());
+
+        if (!extracted || !isNonEmptyFile(fileManager) || !isNonEmptyFile(processHandler)) {
+            android.util.Log.e("WinMali-FileManager",
+                "Unable to restore wfm.exe and winhandler.exe from rootfs_patches.tzst");
+            return false;
+        }
+
+        android.util.Log.i("WinMali-FileManager",
+            "Restored bundled Windows file manager and process handler");
+        return true;
+    }
+
+    private static boolean isNonEmptyFile(File file) {
+        return file.isFile() && file.length() > 0;
     }
 
     private void setupXEnvironment() {
