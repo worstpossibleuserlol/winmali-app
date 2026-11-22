@@ -214,15 +214,15 @@ public abstract class WineInstaller {
             if (manifest == null || !manifest.validateWineDirectory(root)) return null;
 
             File wineExecutable = new File(root, manifest.wineExecutable);
-            return CompatibilityRuntimePackage.isAarch64Elf(wineExecutable) ? wineExecutable : null;
+            return CompatibilityRuntimePackage.isSupportedWineElf(wineExecutable) ? wineExecutable : null;
         }
 
         File bin = new File(root, "bin");
         File wine64 = new File(bin, "wine64");
-        if (CompatibilityRuntimePackage.isAarch64Elf(wine64)) return wine64;
+        if (CompatibilityRuntimePackage.isSupportedWineElf(wine64)) return wine64;
 
         File wine = new File(bin, "wine");
-        return CompatibilityRuntimePackage.isAarch64Elf(wine) ? wine : null;
+        return CompatibilityRuntimePackage.isSupportedWineElf(wine) ? wine : null;
     }
 
     private static boolean hasWineRuntimeBinaries(File root) {
