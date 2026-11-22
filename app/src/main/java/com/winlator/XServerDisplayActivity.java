@@ -746,7 +746,6 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         if (!winHandler.start()) {
             android.util.Log.e("WinMali-Launch", "Unable to start WinHandler UDP listener on port 7947");
             runOnUiThread(() -> {
-                preloaderDialog.closeOnUiThread();
                 AppUtils.showToast(this, R.string.winhandler_start_failed);
                 finish();
             });
