@@ -15,7 +15,9 @@ import java.util.regex.Pattern;
 public class WineInfo implements Parcelable {
     public static final String MAIN_WINE_VERSION = "10.10";
     public static final WineInfo MAIN_WINE_INFO = new WineInfo(MAIN_WINE_VERSION);
-    private static final Pattern pattern = Pattern.compile("^wine\\-([0-9\\.]+)\\-?([0-9\\.]+)?\\-?(x86|x86_64)?$");
+    private static final Pattern VERSION_OUTPUT_PATTERN = Pattern.compile(
+        "^wine\\-([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][A-Za-z0-9][A-Za-z0-9.-]*)?)",
+        Pattern.CASE_INSENSITIVE);
     public final String version;
     public final String subversion;
     public final String path;
@@ -85,16 +87,31 @@ public class WineInfo implements Parcelable {
         dest.writeInt(mainRuntime ? 1 : 0);
     }
 
+    static String parseVersionIdentifier(String identifier) {
+        if (identifier == null || !identifier.startsWith("wine-")) return null;
+        String version = identifier.substring("wine-".length());
+        return CompatibilityRuntimePackage.isValidVersionName(version) ? version : null;
+    }
+
+    static String parseVersionOutput(String outputLine) {
+        if (outputLine == null) return null;
+        Matcher matcher = VERSION_OUTPUT_PATTERN.matcher(outputLine.trim());
+        if (!matcher.find()) return null;
+        String version = matcher.group(1);
+        return CompatibilityRuntimePackage.isValidVersionName(version) ? version : null;
+    }
+
     @NonNull
     public static WineInfo fromIdentifier(Context context, String identifier) {
-        if (identifier == null || identifier.equals(MAIN_WINE_INFO.identifier())) return MAIN_WINE_INFO;
-        Matcher matcher = pattern.matcher(identifier);
-        if (matcher.matches()) {
-            File installedWineDir = RootFS.find(context).getInstalledWineDir();
-            String path = (new File(installedWineDir, identifier)).getPath();
-            return new WineInfo(matcher.group(1), matcher.group(2), path);
+        if (identifier == null || identifier.equals(MAIN_WINE_INFO.identifier()) || context == null) {
+            return MAIN_WINE_INFO;
         }
-        else return MAIN_WINE_INFO;
+        String version = parseVersionIdentifier(identifier);
+        if (version == null) return MAIN_WINE_INFO;
+
+        File installedWineDir = RootFS.find(context).getInstalledWineDir();
+        String path = (new File(installedWineDir, identifier)).getPath();
+        return new WineInfo(version, null, path);
     }
 
     public static boolean isMainWineVersion(String wineVersion) {
