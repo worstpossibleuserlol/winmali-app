@@ -165,7 +165,10 @@ public class InputControlsManager {
             data.put("id", newId);
             data.put("name", newName);
             if (data.has("template")) data.remove("template");
-            if (!FileUtils.writeString(newFile, data.toString())) return null;
+            if (!FileUtils.writeString(newFile, data.toString())) {
+                FileUtils.delete(newFile);
+                return null;
+            }
         }
         catch (JSONException | RuntimeException error) {
             return null;
@@ -181,6 +184,7 @@ public class InputControlsManager {
     }
 
     public void removeProfile(ControlsProfile profile) {
+        if (profile == null) return;
         File file = ControlsProfile.getProfileFile(context, profile.id);
         if (file.isFile() && file.delete()) profiles.remove(profile);
     }
@@ -196,7 +200,10 @@ public class InputControlsManager {
             // retain it for retries or other processing.
             JSONObject importedData = new JSONObject(data.toString());
             importedData.put("id", newId);
-            if (!FileUtils.writeString(newFile, importedData.toString())) return null;
+            if (!FileUtils.writeString(newFile, importedData.toString())) {
+                FileUtils.delete(newFile);
+                return null;
+            }
 
             ControlsProfile newProfile = loadProfile(context, newFile);
             if (newProfile == null) {
@@ -226,22 +233,28 @@ public class InputControlsManager {
     public File exportProfile(ControlsProfile profile) {
         if (profile == null || context == null) return null;
         File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-        File exportDirectory = new File(downloadsDir, "Winlator/profiles");
+        if (downloadsDir == null || FileUtils.isSymlink(downloadsDir)) return null;
+        File winlatorDirectory = new File(downloadsDir, "Winlator");
+        File exportDirectory = new File(winlatorDirectory, "profiles");
+        if (FileUtils.isSymlink(winlatorDirectory) || FileUtils.isSymlink(exportDirectory)) return null;
         if (!exportDirectory.isDirectory() && !exportDirectory.mkdirs()) return null;
 
         String filename = InputControlsProfileUtils.safeExportFileName(profile.getName(), profile.id);
         File destination = new File(exportDirectory, filename);
         try {
-            String basePath = exportDirectory.getCanonicalPath();
+            String downloadsPath = downloadsDir.getCanonicalPath();
+            String exportPath = exportDirectory.getCanonicalPath();
             String targetPath = destination.getCanonicalPath();
-            if (!targetPath.startsWith(basePath + File.separator)) return null;
+            if (!exportPath.startsWith(downloadsPath + File.separator) ||
+                !targetPath.startsWith(exportPath + File.separator)) return null;
         }
         catch (IOException | SecurityException error) {
             return null;
         }
 
         File source = ControlsProfile.getProfileFile(context, profile.id);
-        if (!FileUtils.copy(source, destination) || !destination.isFile()) return null;
+        if (!source.isFile() || FileUtils.isSymlink(source) ||
+            !FileUtils.copy(source, destination) || !destination.isFile()) return null;
         MediaScannerConnection.scanFile(context, new String[]{destination.getAbsolutePath()}, null, null);
         return destination;
     }
