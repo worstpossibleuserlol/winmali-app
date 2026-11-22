@@ -323,6 +323,10 @@
     <string name="internal_storage">Internal Storage</string>
     <string name="windows_version">Windows Version</string>
     <string name="install_component">Install Component</string>
+    <string name="unable_to_import_component">Unable to import this component. Check the package format and required files.</string>
+    <string name="component_imported">Compatibility runtime imported. Press Confirm to apply it.</string>
+    <string name="unable_to_install_compatibility_runtime">Unable to install a valid ARM64 Box64 runtime. Check your selected version or import another runtime package.</string>
+    <string name="compatibility_runtime_fallback">The selected Box64 runtime could not be extracted. WinMali has loaded the built-in Box64 version instead.</string>
     <string name="open_android_browser_from_wine">Open Android Browser from Wine</string>
     <string name="use_android_clipboard_on_Wine">Use Android Clipboard on Wine</string>
     <string name="enable_background_protection">Enable Background Protection</string>
