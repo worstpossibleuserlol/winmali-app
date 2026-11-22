@@ -102,15 +102,27 @@ public abstract class RootFSInstaller {
         Context appContext = context.getApplicationContext();
         if (appContext == null) appContext = context;
 
-        if (!forceReinstall && isReady(appContext)) {
-            if (callback != null) new Handler(context.getMainLooper()).post(() -> callback.call(true));
-            return;
+        boolean readyImmediately = false;
+        synchronized (INSTALL_LOCK) {
+            // Never report the old rootfs as ready while a forced reinstall is
+            // replacing it. Wait for the active operation and share its result.
+            if (installationRunning) {
+                if (callback != null) INSTALL_CALLBACKS.add(callback);
+                return;
+            }
+
+            if (!forceReinstall && isReady(appContext)) {
+                readyImmediately = true;
+            }
+            else {
+                if (callback != null) INSTALL_CALLBACKS.add(callback);
+                installationRunning = true;
+            }
         }
 
-        synchronized (INSTALL_LOCK) {
-            if (callback != null) INSTALL_CALLBACKS.add(callback);
-            if (installationRunning) return;
-            installationRunning = true;
+        if (readyImmediately) {
+            if (callback != null) new Handler(context.getMainLooper()).post(() -> callback.call(true));
+            return;
         }
 
         final Activity activity = context instanceof Activity ? (Activity)context : null;
