@@ -172,12 +172,20 @@ public abstract class FileUtils {
     }
 
     public static boolean isAscendantOf(File srcFile, File dstFile) {
-        File parent = dstFile.getParentFile();
-        while (parent != null) {
-            if (parent.equals(srcFile)) return true;
-            parent = parent.getParentFile();
+        if (srcFile == null || dstFile == null) return false;
+        try {
+            File source = srcFile.getCanonicalFile();
+            File parent = dstFile.getCanonicalFile().getParentFile();
+            while (parent != null) {
+                if (parent.equals(source)) return true;
+                parent = parent.getParentFile();
+            }
+            return false;
         }
-        return false;
+        catch (IOException error) {
+            // Fail closed: a failed canonical-path check must not permit recursive self-copy.
+            return true;
+        }
     }
 
     public static boolean copy(File srcFile, File dstFile) {

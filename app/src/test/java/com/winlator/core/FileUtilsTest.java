@@ -18,6 +18,14 @@ public class FileUtilsTest {
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
 
     @Test
+    public void detectsDescendantsEvenWhenDestinationContainsDotDotSegments() throws IOException {
+        File source = new File(temporaryFolder.getRoot(), "source");
+        assertTrue(source.mkdirs());
+        File destination = new File(source, "../source/child");
+        assertTrue(FileUtils.isAscendantOf(source, destination));
+    }
+
+    @Test
     public void copyingAFileOntoItselfDoesNotTruncateIt() throws IOException {
         File file = new File(temporaryFolder.getRoot(), "same-file.txt");
         Files.write(file.toPath(), "preserve-me".getBytes(java.nio.charset.StandardCharsets.UTF_8));
