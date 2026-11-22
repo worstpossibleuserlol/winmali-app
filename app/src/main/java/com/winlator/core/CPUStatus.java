@@ -93,6 +93,7 @@ public abstract class CPUStatus {
             long celsius;
             if (raw <= 150) celsius = raw;
             else if (raw <= 1500) celsius = raw / 10;
+            else if (raw <= 15000) celsius = raw / 100;
             else if (raw <= 150000) celsius = raw / 1000;
             else return -1;
             return celsius >= 1 && celsius <= 150 ? (int)celsius : -1;
