@@ -2,14 +2,20 @@ package com.winlator.winhandler;
 
 import org.junit.Test;
 
-import java.lang.reflect.Field;
 import java.net.DatagramSocket;
 import java.net.DatagramPacket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 public class WinHandlerTest {
@@ -36,44 +42,57 @@ public class WinHandlerTest {
         }
     }
     @Test
-    public void receivePacketRestoresCapacityAfterShortDatagram() throws Exception {
+    public void fullProcessMessageIsParsedAfterOneByteInitHandshake() throws Exception {
         WinHandler handler = new WinHandler(null);
-        Field initReceivedField = WinHandler.class.getDeclaredField("initReceived");
-        Field receivePacketField = WinHandler.class.getDeclaredField("receivePacket");
-        initReceivedField.setAccessible(true);
-        receivePacketField.setAccessible(true);
+        CountDownLatch processReceived = new CountDownLatch(1);
+        AtomicReference<ProcessInfo> processInfo = new AtomicReference<>();
+        handler.setOnGetProcessInfoListener((index, count, info) -> {
+            processInfo.set(info);
+            processReceived.countDown();
+        });
 
-        try (DatagramSocket firstSender = new DatagramSocket();
-             DatagramSocket secondSender = new DatagramSocket()) {
+        try (DatagramSocket sender = new DatagramSocket()) {
             assertTrue("WinHandler should bind before start returns", handler.start());
             InetAddress loopback = InetAddress.getByName("127.0.0.1");
+
             byte[] init = new byte[]{RequestCodes.INIT};
-            DatagramPacket initPacket = new DatagramPacket(init, init.length, loopback, 7947);
+            sender.send(new DatagramPacket(init, init.length, loopback, 7947));
 
-            long deadline = System.nanoTime() + 2_000_000_000L;
-            while (!initReceivedField.getBoolean(handler) && System.nanoTime() < deadline) {
-                firstSender.send(initPacket);
-                Thread.sleep(10);
-            }
-            assertTrue("initial one-byte handshake should reach WinHandler",
-                initReceivedField.getBoolean(handler));
-
-            byte[] command = new byte[]{(byte)127, 1, 2, 3, 4, 5, 6, 7};
-            DatagramPacket commandPacket = new DatagramPacket(command, command.length, loopback, 7947);
-            secondSender.send(commandPacket);
-
-            DatagramPacket received = (DatagramPacket)receivePacketField.get(handler);
-            deadline = System.nanoTime() + 2_000_000_000L;
-            while (received.getPort() != secondSender.getLocalPort() && System.nanoTime() < deadline) {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (!handler.initReceived && System.nanoTime() < deadline) {
                 Thread.sleep(5);
             }
+            assertTrue("one-byte INIT handshake should be received", handler.initReceived);
 
-            assertEquals("subsequent messages must receive the full buffer length",
-                command.length, received.getLength());
+            byte[] name = new byte[32];
+            byte[] encodedName = "sample.exe".getBytes(StandardCharsets.US_ASCII);
+            System.arraycopy(encodedName, 0, name, 0, encodedName.length);
+
+            ByteBuffer message = ByteBuffer.allocate(1 + 4 + 2 + 2 + 4 + 8 + 4 + 1 + name.length)
+                .order(ByteOrder.LITTLE_ENDIAN);
+            message.put(RequestCodes.GET_PROCESS);
+            message.putInt(53);
+            message.putShort((short)1);
+            message.putShort((short)0);
+            message.putInt(1234);
+            message.putLong(4096L);
+            message.putInt(3);
+            message.put((byte)1);
+            message.put(name);
+
+            byte[] request = message.array();
+            sender.send(new DatagramPacket(request, request.length, loopback, 7947));
+
+            assertTrue("full GET_PROCESS message should be parsed after INIT",
+                processReceived.await(2, TimeUnit.SECONDS));
+            assertNotNull(processInfo.get());
+            assertEquals("sample.exe", processInfo.get().name);
+            assertEquals(1234, processInfo.get().pid);
+            assertEquals(4096L, processInfo.get().memoryUsage);
+            assertTrue(processInfo.get().wow64Process);
         }
         finally {
             handler.stop();
         }
     }
-
 }
