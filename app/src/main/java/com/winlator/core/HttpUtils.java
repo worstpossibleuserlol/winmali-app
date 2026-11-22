@@ -20,12 +20,29 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public abstract class HttpUtils {
     private static final long MAX_DOWNLOAD_BYTES = 1024L * 1024L * 1024L;
+    private static final long MAX_TEXT_DOWNLOAD_BYTES = 4L * 1024L * 1024L;
 
     private static final ExecutorService DOWNLOAD_OPERATIONS = Executors.newCachedThreadPool(runnable -> {
         Thread thread = new Thread(runnable, "WinMali-download");
         thread.setDaemon(true);
         return thread;
     });
+
+    static byte[] readLimited(InputStream input, long maxBytes) throws IOException {
+        if (input == null || maxBytes < 0) throw new IOException("Invalid bounded input");
+        try (InputStream inStream = input;
+             java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            long total = 0;
+            int count;
+            while ((count = inStream.read(buffer)) != -1) {
+                total += count;
+                if (total > maxBytes) throw new IOException("Response exceeds the configured size limit");
+                output.write(buffer, 0, count);
+            }
+            return output.toByteArray();
+        }
+    }
 
     private static void downloadAsync(String url, Callback<String> onDownloadComplete) {
         HttpURLConnection connection = null;
@@ -35,9 +52,13 @@ public abstract class HttpUtils {
             connection.setConnectTimeout(15000);
             connection.setReadTimeout(30000);
             if (connection.getResponseCode() == HttpURLConnection.HTTP_OK) {
+                long contentLength = connection.getContentLengthLong();
+                if (contentLength > MAX_TEXT_DOWNLOAD_BYTES) {
+                    throw new IOException("Text response exceeds the configured size limit");
+                }
                 byte[] bytes;
                 try (InputStream inStream = connection.getInputStream()) {
-                    bytes = StreamUtils.copyToByteArray(inStream);
+                    bytes = readLimited(inStream, MAX_TEXT_DOWNLOAD_BYTES);
                 }
                 result = new String(bytes, StandardCharsets.UTF_8);
             }
