@@ -343,7 +343,7 @@ public abstract class TarCompressorUtils {
                 return entryCount > 0;
             }
         }
-        catch (IOException | SecurityException | RuntimeException e) {
+        catch (IOException | RuntimeException e) {
             android.util.Log.w("WinMali-Archive", "Archive extraction rejected", e);
             return false;
         }
