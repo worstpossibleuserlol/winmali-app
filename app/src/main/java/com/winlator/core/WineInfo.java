@@ -54,7 +54,12 @@ public class WineInfo implements Parcelable {
     @NonNull
     @Override
     public String toString() {
-        return "Wine "+fullVersion()+(mainRuntime ? " (Custom)" : "");
+        String result = "Wine "+fullVersion()+(mainRuntime ? " (Custom)" : "");
+        if (path != null) {
+            String architectures = CompatibilityRuntimeManifest.getArchitectureSummary(new File(path));
+            if (!architectures.equals("guest ABI not detected")) result += " ["+architectures+"]";
+        }
+        return result;
     }
 
     @Override
