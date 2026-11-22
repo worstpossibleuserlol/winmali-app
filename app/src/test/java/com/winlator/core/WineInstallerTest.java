@@ -9,6 +9,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertNull;
 
 public class WineInstallerTest {
@@ -39,6 +41,40 @@ public class WineInstallerTest {
 
     private File createArm32Elf(File file) throws IOException {
         return createElf(file, 1, 40);
+    }
+
+    @Test
+    public void restoresOriginalRelativeHomeSymlinkAfterWineInstall() throws IOException {
+        File root = temporaryFolder.getRoot();
+        File home = new File(root, "home/xuser");
+        assertTrue(home.getParentFile().mkdirs());
+        assertTrue(FileUtils.symlink("xuser-3", home.getPath()));
+        assertTrue(FileUtils.symlink("preinstall/container-pattern", home.getPath()));
+
+        assertTrue(WineInstaller.restoreHomeLink(home, true, "xuser-3"));
+        assertTrue(FileUtils.isSymlink(home));
+        assertEquals("xuser-3", FileUtils.readSymlink(home));
+    }
+
+    @Test
+    public void removesTemporaryHomeSymlinkWhenThereWasNoOriginal() throws IOException {
+        File home = new File(temporaryFolder.getRoot(), "home/xuser");
+        assertTrue(home.getParentFile().mkdirs());
+        assertTrue(FileUtils.symlink("preinstall/container-pattern", home.getPath()));
+
+        assertTrue(WineInstaller.restoreHomeLink(home, false, null));
+        assertNull(FileUtils.readSymlink(home));
+        assertFalse(home.exists());
+    }
+
+    @Test
+    public void doesNotSilentlyReplaceARealHomeDirectory() throws IOException {
+        File home = new File(temporaryFolder.getRoot(), "home/xuser");
+        assertTrue(home.mkdirs());
+        Files.write(new File(home, "keep.txt").toPath(), "keep".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        assertFalse(FileUtils.symlink("preinstall/container-pattern", home.getPath()));
+        assertTrue(new File(home, "keep.txt").isFile());
     }
 
     @Test

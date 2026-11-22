@@ -27,7 +27,7 @@ public abstract class WineInstaller {
         return thread;
     });
 
-    private static boolean restoreHomeLink(File linkFile, boolean hadOriginalSymlink, String originalTarget) {
+    static boolean restoreHomeLink(File linkFile, boolean hadOriginalSymlink, String originalTarget) {
         boolean restored;
         if (hadOriginalSymlink) {
             restored = originalTarget != null && !originalTarget.isEmpty() &&
