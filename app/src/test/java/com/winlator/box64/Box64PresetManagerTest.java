@@ -30,6 +30,23 @@ public class Box64PresetManagerTest {
     }
 
     @Test
+    public void roundTripsPresetNamesAndValuesContainingStorageDelimiters() {
+        String name = "Balanced, fast | stable";
+        String envVars = "BOX64_LOG=1 BOX64_CUSTOM=value,with|separators";
+        String encoded = "B64|CUSTOM-4|"+
+            java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(name.getBytes(java.nio.charset.StandardCharsets.UTF_8))+"|"+
+            java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(envVars.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        assertArrayEquals(new String[]{"CUSTOM-4", name, envVars},
+            Box64PresetManager.parseCustomPresetEntry(encoded));
+    }
+
+    @Test
+    public void rejectsCorruptedEncodedPresetFields() {
+        assertNull(Box64PresetManager.parseCustomPresetEntry("B64|CUSTOM-4|%%%|%%%"));
+    }
+
+    @Test
     public void preservesDelimiterTextInsideEnvironmentVariableField() {
         assertArrayEquals(new String[]{"CUSTOM-3", "Custom", "A=B|C=D"},
             Box64PresetManager.parseCustomPresetEntry("CUSTOM-3|Custom|A=B|C=D"));

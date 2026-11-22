@@ -12,11 +12,14 @@ import com.winlator.R;
 import com.winlator.core.EnvVars;
 
 import java.util.ArrayList;
-import java.util.Iterator;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.Base64;
 import java.util.regex.Pattern;
 
 public abstract class Box64PresetManager {
     private static final Pattern CUSTOM_PRESET_ID = Pattern.compile("CUSTOM-[1-9][0-9]{0,8}");
+    private static final String ENCODED_PRESET_MARKER = "B64";
 
     public static EnvVars getEnvVars(Context context, String id) {
         EnvVars envVars = new EnvVars();
@@ -102,48 +105,84 @@ public abstract class Box64PresetManager {
         return null;
     }
 
+    private static String decodePresetField(String value) {
+        try {
+            return new String(Base64.getUrlDecoder().decode(value), java.nio.charset.StandardCharsets.UTF_8);
+        }
+        catch (IllegalArgumentException error) {
+            return null;
+        }
+    }
+
+    private static String encodePresetField(String value) {
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(
+            value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
     static String[] parseCustomPresetEntry(String entry) {
         if (entry == null || entry.isEmpty()) return null;
-        String[] fields = entry.split("\\|", 3);
+
+        String[] fields;
+        if (entry.startsWith(ENCODED_PRESET_MARKER+"|")) {
+            fields = entry.split("\\|", 4);
+            if (fields.length != 4 || !ENCODED_PRESET_MARKER.equals(fields[0])) return null;
+            String name = decodePresetField(fields[2]);
+            String envVars = decodePresetField(fields[3]);
+            if (name == null || envVars == null) return null;
+            fields = new String[]{fields[1], name, envVars};
+        }
+        else {
+            // Read legacy separator-based entries so upgrades do not drop old presets.
+            fields = entry.split("\\|", 3);
+        }
+
         if (fields.length != 3 || !CUSTOM_PRESET_ID.matcher(fields[0]).matches() ||
-            fields[1].trim().isEmpty()) return null;
+            fields[1].trim().isEmpty() || fields[1].length() > 128 || fields[2].length() > 65536) return null;
         return fields;
     }
 
     private static ArrayList<String[]> customPresetsIterator(Context context) {
+        ArrayList<String[]> presets = new ArrayList<>();
+        if (context == null) return presets;
         SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
         String encoded = preferences.getString("box64_custom_presets", "");
-        ArrayList<String[]> presets = new ArrayList<>();
         if (encoded == null || encoded.isEmpty()) return presets;
 
+        Set<String> seenIds = new HashSet<>();
         for (String entry : encoded.split(",", -1)) {
             String[] parsed = parseCustomPresetEntry(entry);
-            if (parsed != null) presets.add(parsed);
+            if (parsed != null && seenIds.add(parsed[0])) presets.add(parsed);
         }
         return presets;
     }
 
     public static int getNextPresetId(Context context) {
-        int maxId = 0;
+        Set<Integer> usedIds = new HashSet<>();
         for (String[] preset : customPresetsIterator(context)) {
             try {
-                int id = Integer.parseInt(preset[0].substring((Box64Preset.CUSTOM+"-").length()));
-                maxId = Math.max(maxId, id);
+                usedIds.add(Integer.parseInt(preset[0].substring((Box64Preset.CUSTOM+"-").length())));
             }
             catch (NumberFormatException ignored) {}
         }
-        return maxId == Integer.MAX_VALUE ? 1 : maxId + 1;
+
+        // Reuse the first free valid ID rather than wrapping to an existing ID.
+        for (int candidate = 1; candidate <= 999999999; candidate++) {
+            if (!usedIds.contains(candidate)) return candidate;
+        }
+        return -1;
     }
 
     public static void editPreset(Context context, String id, String name, EnvVars envVars) {
+        if (context == null || name == null || name.trim().isEmpty() || name.length() > 128) return;
         final String key = "box64_custom_presets";
         ArrayList<String[]> presets = customPresetsIterator(context);
         boolean updated = false;
 
         if (id != null) {
+            if (!CUSTOM_PRESET_ID.matcher(id).matches()) return;
             for (String[] preset : presets) {
                 if (preset[0].equals(id)) {
-                    preset[1] = name;
+                    preset[1] = name.trim();
                     preset[2] = envVars != null ? envVars.toString() : "";
                     updated = true;
                     break;
@@ -152,13 +191,16 @@ public abstract class Box64PresetManager {
             if (!updated) return;
         }
         else {
-            presets.add(new String[]{Box64Preset.CUSTOM+"-"+getNextPresetId(context),
-                name, envVars != null ? envVars.toString() : ""});
+            int nextId = getNextPresetId(context);
+            if (nextId <= 0) return;
+            presets.add(new String[]{Box64Preset.CUSTOM+"-"+nextId,
+                name.trim(), envVars != null ? envVars.toString() : ""});
         }
 
         ArrayList<String> encodedPresets = new ArrayList<>();
         for (String[] preset : presets) {
-            encodedPresets.add(preset[0]+"|"+preset[1]+"|"+preset[2]);
+            encodedPresets.add(ENCODED_PRESET_MARKER+"|"+preset[0]+"|"+
+                encodePresetField(preset[1])+"|"+encodePresetField(preset[2]));
         }
         PreferenceManager.getDefaultSharedPreferences(context).edit()
             .putString(key, String.join(",", encodedPresets)).apply();
