@@ -29,10 +29,14 @@ import java.io.OutputStream;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 public abstract class TarCompressorUtils {
     private static final int MAX_METADATA_READ_BYTES = 16 * 1024 * 1024;
+    private static final int MAX_ARCHIVE_ENTRIES = 500000;
+    private static final long MAX_EXTRACTED_BYTES = 12L * 1024L * 1024L * 1024L;
 
     public enum Type {XZ, ZSTD, GZIP}
 
@@ -215,6 +219,20 @@ public abstract class TarCompressorUtils {
         return candidatePath.equals(rootPath) || candidatePath.startsWith(rootPath + File.separator);
     }
 
+    private static String normalizeArchiveEntryName(String entryName, boolean directory) {
+        if (entryName == null || entryName.isEmpty() || entryName.indexOf('\u0000') >= 0) return null;
+        String normalized = entryName.replace((char)92, '/');
+        while (normalized.startsWith("./")) normalized = normalized.substring(2);
+        if (normalized.equals(".") || normalized.isEmpty()) return directory ? "" : null;
+        if (normalized.startsWith("/") || normalized.matches("^[A-Za-z]:.*")) return null;
+        if (normalized.endsWith("/")) normalized = normalized.substring(0, normalized.length()-1);
+        if (normalized.isEmpty()) return directory ? "" : null;
+        for (String part : normalized.split("/", -1)) {
+            if (part.isEmpty() || part.equals(".") || part.equals("..")) return null;
+        }
+        return normalized;
+    }
+
     private static boolean hasParentTraversal(String path) {
         if (path == null || path.isEmpty() || path.startsWith("/") || path.matches("^[A-Za-z]:.*")) return true;
         String[] parts = path.replace((char)92, '/').split("/");
@@ -251,11 +269,18 @@ public abstract class TarCompressorUtils {
                  ArchiveInputStream tar = new TarArchiveInputStream(inStream)) {
                 TarArchiveEntry entry;
                 int entryCount = 0;
+                long totalExtracted = 0;
+                Set<String> seenEntries = new HashSet<>();
                 while ((entry = (TarArchiveEntry)tar.getNextEntry()) != null) {
                     if (!tar.canReadEntryData(entry)) return false;
-                    entryCount++;
+                    if (++entryCount > MAX_ARCHIVE_ENTRIES) return false;
                     if (entry.isLink() && !entry.isSymbolicLink()) return false;
                     if (!entry.isDirectory() && !entry.isSymbolicLink() && !entry.isFile()) return false;
+                    if (entry.getSize() > MAX_EXTRACTED_BYTES) return false;
+
+                    String normalizedName = normalizeArchiveEntryName(entry.getName(), entry.isDirectory());
+                    if (normalizedName == null) return false;
+                    if (!normalizedName.isEmpty() && !seenEntries.add(normalizedName)) return false;
 
                     File file = resolveArchiveEntry(root, entry.getName());
                     if (file == null) return false;
@@ -263,9 +288,13 @@ public abstract class TarCompressorUtils {
                     if (onExtractFileListener != null) {
                         file = onExtractFileListener.onExtractFile(file, entry.getSize());
                         if (file == null) {
-                            if (entry.isFile() && entry.getSize() > 0) {
+                            if (entry.isFile()) {
                                 byte[] discard = new byte[StreamUtils.BUFFER_SIZE];
-                                while (tar.read(discard) != -1) {}
+                                int count;
+                                while ((count = tar.read(discard)) != -1) {
+                                    totalExtracted += count;
+                                    if (totalExtracted > MAX_EXTRACTED_BYTES) return false;
+                                }
                             }
                             continue;
                         }
@@ -279,7 +308,8 @@ public abstract class TarCompressorUtils {
                     }
                     else if (entry.isSymbolicLink()) {
                         String linkName = entry.getLinkName();
-                        if (linkName == null || linkName.isEmpty() || new File(linkName).isAbsolute()) return false;
+                        if (linkName == null || linkName.isEmpty() || new File(linkName).isAbsolute() ||
+                            linkName.matches("^[A-Za-z]:.*")) return false;
 
                         File linkTarget = new File(file.getParentFile(), linkName);
                         if (!isWithinDirectory(root, linkTarget)) return false;
@@ -294,10 +324,18 @@ public abstract class TarCompressorUtils {
                         if (!isWithinDirectory(root, file) || hasSymlinkParent(root, file)) return false;
                         if (FileUtils.isSymlink(file) || (file.exists() && !file.isFile())) return false;
 
+                        long entryBytes = 0;
                         try (BufferedOutputStream outStream = new BufferedOutputStream(new FileOutputStream(file), StreamUtils.BUFFER_SIZE)) {
-                            if (!StreamUtils.copy(tar, outStream)) return false;
+                            byte[] buffer = new byte[StreamUtils.BUFFER_SIZE];
+                            int count;
+                            while ((count = tar.read(buffer)) != -1) {
+                                entryBytes += count;
+                                totalExtracted += count;
+                                if (totalExtracted > MAX_EXTRACTED_BYTES) return false;
+                                outStream.write(buffer, 0, count);
+                            }
                         }
-                        if (entry.getSize() >= 0 && file.length() != entry.getSize()) return false;
+                        if (entry.getSize() >= 0 && entryBytes != entry.getSize()) return false;
                     }
 
                     if (!FileUtils.isSymlink(file)) FileUtils.chmod(file, 0771);
@@ -305,7 +343,8 @@ public abstract class TarCompressorUtils {
                 return entryCount > 0;
             }
         }
-        catch (IOException | SecurityException e) {
+        catch (IOException | SecurityException | RuntimeException e) {
+            android.util.Log.w("WinMali-Archive", "Archive extraction rejected", e);
             return false;
         }
     }

@@ -25,23 +25,23 @@ import java.util.zip.ZipOutputStream;
 public abstract class ZipUtils {
     private static final long MAX_EXTRACTED_BYTES = 512L * 1024L * 1024L;
     private static final int MAX_READ_BYTES = 16 * 1024 * 1024;
+    private static final int MAX_ARCHIVE_ENTRIES = 100000;
 
-    private static void addFile(ZipOutputStream zip, File file, String entryName) {
-        try {
-            ZipEntry entry = new ZipEntry(entryName);
-            entry.setTime(file.lastModified());
-            zip.putNextEntry(entry);
-
-            try (BufferedInputStream inStream = new BufferedInputStream(new FileInputStream(file), StreamUtils.BUFFER_SIZE)) {
-                StreamUtils.copy(inStream, zip);
-            }
+    private static void addFile(ZipOutputStream zip, File file, String entryName) throws IOException {
+        ZipEntry entry = new ZipEntry(entryName);
+        entry.setTime(file.lastModified());
+        zip.putNextEntry(entry);
+        try (BufferedInputStream inStream = new BufferedInputStream(new FileInputStream(file), StreamUtils.BUFFER_SIZE)) {
+            if (!StreamUtils.copy(inStream, zip)) throw new IOException("Unable to read ZIP source: "+file);
         }
-        catch (Exception e) {}
+        finally {
+            zip.closeEntry();
+        }
     }
 
     private static void addDirectory(ZipOutputStream zip, File folder, String basePath) throws IOException {
         File[] files = folder.listFiles();
-        if (files == null) return;
+        if (files == null) throw new IOException("Unable to list ZIP directory: "+folder);
         for (File file : files) {
             if (FileUtils.isSymlink(file)) continue;
             if (file.isDirectory()) {
@@ -49,31 +49,61 @@ public abstract class ZipUtils {
                 ZipEntry entry = new ZipEntry(entryName);
                 entry.setTime(file.lastModified());
                 zip.putNextEntry(entry);
+                zip.closeEntry();
                 addDirectory(zip, file, entryName);
             }
-            else addFile(zip, file, basePath+file.getName());
+            else if (file.isFile()) addFile(zip, file, basePath+file.getName());
+            else throw new IOException("Unsupported ZIP source: "+file);
         }
     }
 
-    public static void compress(File file, File destination) {
-        compress(new File[]{file}, destination);
+    public static boolean compress(File file, File destination) {
+        return compress(new File[]{file}, destination);
     }
 
-    public static void compress(File[] files, File destination) {
+    public static boolean compress(File[] files, File destination) {
+        if (files == null || files.length == 0 || destination == null) return false;
+        File parent = destination.getAbsoluteFile().getParentFile();
+        if (parent == null || (!parent.isDirectory() && !parent.mkdirs())) return false;
+        File temporary = new File(parent, destination.getName()+".partial-"+UUID.randomUUID());
+        boolean completed = false;
         try {
-            try (ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(destination), StreamUtils.BUFFER_SIZE))) {
+            try (ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(temporary), StreamUtils.BUFFER_SIZE))) {
                 for (File file : files) {
+                    if (file == null || (!file.exists() && !FileUtils.isSymlink(file))) {
+                        throw new IOException("ZIP source does not exist");
+                    }
                     if (FileUtils.isSymlink(file)) continue;
                     if (file.isDirectory()) {
                         String basePath = file.getName() + "/";
                         zip.putNextEntry(new ZipEntry(basePath));
+                        zip.closeEntry();
                         addDirectory(zip, file, basePath);
                     }
-                    else addFile(zip, file, file.getName());
+                    else if (file.isFile()) addFile(zip, file, file.getName());
+                    else throw new IOException("Unsupported ZIP source: "+file);
                 }
+                zip.finish();
             }
+            if (!temporary.isFile() || temporary.length() == 0) throw new IOException("ZIP archive is empty");
+            try {
+                Files.move(temporary.toPath(), destination.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            }
+            catch (AtomicMoveNotSupportedException error) {
+                Files.move(temporary.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
+            completed = destination.isFile() && destination.length() > 0;
+            return completed;
         }
-        catch (IOException e) {}
+        catch (IOException | RuntimeException error) {
+            android.util.Log.w("WinMali-ZIP", "ZIP compression failed", error);
+            return false;
+        }
+        finally {
+            if (temporary.exists()) temporary.delete();
+            if (!completed && destination.exists() && destination.length() == 0) destination.delete();
+        }
     }
 
     private static String normalizeEntryName(String entryName, boolean directory) {
@@ -111,15 +141,18 @@ public abstract class ZipUtils {
 
     private static boolean extractToDirectory(File source, File root) {
         long totalExtracted = 0;
+        int entryCount = 0;
+        java.util.HashSet<String> seenEntries = new java.util.HashSet<>();
         try (ZipFile zipFile = new ZipFile(source)) {
             Enumeration<ZipArchiveEntry> entries = zipFile.getEntries();
             while (entries.hasMoreElements()) {
                 ZipArchiveEntry entry = entries.nextElement();
-                if (entry.isUnixSymlink()) return false;
+                if (++entryCount > MAX_ARCHIVE_ENTRIES || entry.isUnixSymlink()) return false;
 
                 String entryName = normalizeEntryName(entry.getName(), entry.isDirectory());
                 if (entryName == null) return false;
                 if (entryName.isEmpty()) continue;
+                if (!seenEntries.add(entryName)) return false;
 
                 File file = new File(root, entryName).getCanonicalFile();
                 if (!isWithinDirectory(root, file) || hasSymlinkParent(root, file) || FileUtils.isSymlink(file)) {
@@ -232,27 +265,31 @@ public abstract class ZipUtils {
         }
     }
 
-    public static void extract(Context context, String assetFile, File destination) {
-        try (ZipInputStream zip = new ZipInputStream(context.getAssets().open(assetFile))) {
-            ZipEntry entry;
-            while ((entry = zip.getNextEntry()) != null) {
-                File file = new File(destination, entry.getName());
-
-                if (entry.isDirectory()) {
-                    if (!file.isDirectory()) file.mkdirs();
+    public static boolean extract(Context context, String assetFile, File destination) {
+        if (context == null || assetFile == null || destination == null) return false;
+        File archive = null;
+        try {
+            archive = File.createTempFile("winmali-asset-", ".zip", context.getCacheDir());
+            try (InputStream input = context.getAssets().open(assetFile);
+                 BufferedOutputStream output = new BufferedOutputStream(new FileOutputStream(archive))) {
+                byte[] buffer = new byte[StreamUtils.BUFFER_SIZE];
+                long copied = 0;
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    copied += count;
+                    if (copied > MAX_EXTRACTED_BYTES) return false;
+                    output.write(buffer, 0, count);
                 }
-                else {
-                    try (BufferedOutputStream outStream = new BufferedOutputStream(new FileOutputStream(file), StreamUtils.BUFFER_SIZE)) {
-                        StreamUtils.copy(zip, outStream);
-                        zip.closeEntry();
-                    }
-                }
-
-                FileUtils.chmod(file, 0771);
+                output.flush();
             }
+            return archive.isFile() && archive.length() > 0 && extract(archive, destination);
         }
-        catch (IOException e) {
-            e.printStackTrace();
+        catch (IOException | RuntimeException error) {
+            android.util.Log.w("WinMali-ZIP", "Asset ZIP extraction failed", error);
+            return false;
+        }
+        finally {
+            if (archive != null && archive.exists()) archive.delete();
         }
     }
 
