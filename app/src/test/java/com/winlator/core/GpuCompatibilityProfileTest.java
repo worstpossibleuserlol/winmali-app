@@ -13,14 +13,14 @@ public class GpuCompatibilityProfileTest {
     }
 
     @Test
-    public void maliNeverReceivesTurnipAndKeepsMaliSafeFallbacks() {
+    public void maliNeverReceivesTurnipOrAutomaticallySelectsDXVK() {
         GpuCompatibilityProfile profile = GpuCompatibilityProfile.resolve(
             "Mali-G610 MC2", "ARM", vk(1, 3, 0), new String[]{"VK_KHR_swapchain"});
         assertEquals(GpuCompatibilityProfile.Vendor.MALI, profile.vendor);
         assertEquals(GraphicsDrivers.VORTEK, profile.vulkanDriver);
         assertEquals(GraphicsDrivers.GLADIO, profile.openGLDriver);
         assertNotEquals(GraphicsDrivers.TURNIP, profile.vulkanDriver);
-        assertEquals(DXWrappers.DXVK, profile.dxWrapper);
+        assertEquals(DXWrappers.WINED3D, profile.dxWrapper);
     }
 
     @Test
