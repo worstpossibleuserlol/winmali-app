@@ -7,6 +7,11 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
+
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class ProcessHelperTest {
     @Test
@@ -103,4 +108,21 @@ public class ProcessHelperTest {
     public void rejectsUnterminatedQuotes() {
         assertThrows(IllegalArgumentException.class, () -> ProcessHelper.splitCommand("program \"unfinished"));
     }
+    @Test
+    public void closesUnusedChildStdinSoWaitingCommandsReceiveEof() throws Exception {
+        CountDownLatch finished = new CountDownLatch(1);
+        AtomicInteger exitCode = new AtomicInteger(Integer.MIN_VALUE);
+
+        int pid = ProcessHelper.exec("/bin/sh -c \"read line; test $? -ne 0\"",
+            null, null, code -> {
+                exitCode.set(code);
+                finished.countDown();
+            });
+
+        assertTrue("child process should start", pid > 0);
+        assertTrue("child should finish after receiving stdin EOF",
+            finished.await(5, TimeUnit.SECONDS));
+        assertEquals(0, exitCode.get());
+    }
+
 }
