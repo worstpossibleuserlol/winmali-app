@@ -62,9 +62,8 @@ public class RootFSTest {
     public void rejectsEmptyWineExecutable() throws Exception {
         File wine = new File(temporaryFolder.getRoot(), "opt/wine");
         assertTrue(new File(wine, "bin").mkdirs());
-        assertTrue(new File(wine, "bin").mkdirs());
         prepareWineLibraries(wine);
-        Files.write(new File(wine, "bin/wine").toPath(), aarch64ElfHeader());
+        assertTrue(new File(wine, "bin/wine").createNewFile());
         assertFalse(RootFS.hasCoreWineFiles(temporaryFolder.getRoot()));
     }
 
@@ -72,9 +71,9 @@ public class RootFSTest {
     public void rejectsMissingArchitectureLibraryDirectory() throws Exception {
         File wine = new File(temporaryFolder.getRoot(), "opt/wine");
         assertTrue(new File(wine, "bin").mkdirs());
-        assertTrue(new File(wine, "bin").mkdirs());
-        assertTrue(new File(wine, "lib/wine/x86_64-windows").mkdirs());
-        assertTrue(new File(wine, "lib/wine/i386-windows").mkdirs());
+        File x64 = new File(wine, "lib/wine/x86_64-windows");
+        assertTrue(x64.mkdirs());
+        Files.write(new File(x64, "kernel32.dll").toPath(), new byte[]{1});
         Files.write(new File(wine, "bin/wine").toPath(), aarch64ElfHeader());
         assertFalse(RootFS.hasCoreWineFiles(temporaryFolder.getRoot()));
     }
