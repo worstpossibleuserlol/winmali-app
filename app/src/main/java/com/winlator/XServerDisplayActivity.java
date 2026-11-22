@@ -49,6 +49,8 @@ import com.winlator.core.DefaultVersion;
 import com.winlator.core.EnvVars;
 import com.winlator.core.FileUtils;
 import com.winlator.core.GeneralComponents;
+import com.winlator.core.GPUHelper;
+import com.winlator.core.GpuCompatibilityProfile;
 import com.winlator.core.KeyValueSet;
 import com.winlator.core.LocaleHelper;
 import com.winlator.core.PreloaderDialog;
@@ -137,6 +139,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     public int frameRatingWindowId = -1;
     private Win32AppWorkarounds win32AppWorkarounds;
     private String screenEffectProfile;
+    private final java.util.concurrent.atomic.AtomicBoolean exitRequested = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -274,6 +277,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         Executors.newSingleThreadExecutor().execute(() -> {
             boolean systemFilesReady = true;
             if (!isGenerateWineprefix()) {
+                applyAutomaticGpuCompatibilityFallback();
                 systemFilesReady = setupWineSystemFiles();
                 if (systemFilesReady) {
                     extractGraphicsDriverFiles();
@@ -446,6 +450,12 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     }
 
     private void exit() {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            runOnUiThread(this::exit);
+            return;
+        }
+        if (!exitRequested.compareAndSet(false, true)) return;
+
         winHandler.stop();
         if (environment != null) environment.stopEnvironmentComponents();
 
@@ -458,6 +468,52 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
         else AppUtils.restartApplication(this);
         ForegroundService.stopSession(this);
+    }
+
+    /**
+     * Re-check automatic Mali settings at launch so containers created by an
+     * older WinMali build do not keep an unsafe automatic DXVK/Turnip selection.
+     * Explicitly manual container settings are left untouched.
+     */
+    private void applyAutomaticGpuCompatibilityFallback() {
+        if (container == null) return;
+
+        String savedAutoSetting = container.getExtra("autoGpuSettings");
+        boolean automaticSettings = "t".equals(savedAutoSetting) ||
+            (savedAutoSetting.isEmpty() && preferences.getBoolean("auto_gpu_settings", true));
+        if (!automaticSettings) return;
+
+        String renderer = "";
+        String vendorName = "";
+        try {
+            renderer = GPUHelper.glGetRenderer(this);
+            vendorName = GPUHelper.glGetVendor(this);
+        }
+        catch (LinkageError | RuntimeException error) {
+            android.util.Log.w("WinMali-GPU", "Unable to identify the GPU for launch compatibility", error);
+        }
+
+        GpuCompatibilityProfile.Vendor vendor =
+            GpuCompatibilityProfile.resolve(renderer, vendorName, 0, null).vendor;
+        if (vendor != GpuCompatibilityProfile.Vendor.MALI) return;
+
+        String safeDXWrapper = GpuCompatibilityProfile.resolveDXWrapperForLaunch(
+            dxwrapper, vendor, true);
+        if (!safeDXWrapper.equals(dxwrapper)) {
+            android.util.Log.w("WinMali-GPU",
+                "Mali GPU detected; replacing automatic DXVK with WineD3D for this session");
+            dxwrapper = safeDXWrapper;
+            dxwrapperConfig = new KeyValueSet[]{new KeyValueSet(), new KeyValueSet()};
+        }
+
+        String safeVulkanDriver = GpuCompatibilityProfile.resolveVulkanDriverForLaunch(
+            graphicsDriver[0], vendor, true);
+        if (!safeVulkanDriver.equals(graphicsDriver[0])) {
+            android.util.Log.w("WinMali-GPU",
+                "Mali GPU detected; replacing automatic Turnip with Vortek for this session");
+            graphicsDriver[0] = safeVulkanDriver;
+            graphicsDriverConfig[0] = new KeyValueSet();
+        }
     }
 
     private boolean setupWineSystemFiles() {
@@ -665,7 +721,14 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         guestProgramLauncherComponent.setEnvVars(envVars);
-        guestProgramLauncherComponent.setTerminationCallback((status) -> exit());
+        guestProgramLauncherComponent.setTerminationCallback((status) -> {
+            android.util.Log.e("WinMali-Launch", "Wine/Box64 session exited with status "+status);
+            runOnUiThread(() -> {
+                if (!isFinishing() && !isDestroyed()) exit();
+            });
+        });
+        guestProgramLauncherComponent.setOutputCallback((line) ->
+            android.util.Log.i("WinMali-Guest", line));
         environment.addComponent(guestProgramLauncherComponent);
 
         if (isGenerateWineprefix()) {
@@ -676,9 +739,20 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             envVars.putAll(overrideEnvVars);
             overrideEnvVars = null;
         }
-        environment.startEnvironmentComponents();
 
-        winHandler.start();
+        // winhandler.exe sends its initial UDP handshake immediately. Bind the
+        // Android listener synchronously before starting Box64/Wine or that first
+        // packet can be lost and applications will never appear.
+        if (!winHandler.start()) {
+            android.util.Log.e("WinMali-Launch", "Unable to start WinHandler UDP listener on port 7947");
+            runOnUiThread(() -> {
+                AppUtils.showToast(this, R.string.winhandler_start_failed);
+                finish();
+            });
+            return;
+        }
+
+        environment.startEnvironmentComponents();
         envVars.clear();
         graphicsDriver = null;
         dxwrapperConfig = null;
