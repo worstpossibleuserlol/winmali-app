@@ -194,6 +194,13 @@ public abstract class FileUtils {
 
     public static boolean copy(File srcFile, File dstFile, Callback<File> callback) {
         if (srcFile == null || dstFile == null) return false;
+        try {
+            // Copying a directory into itself must be a no-op, not a recursive walk.
+            if (srcFile.getCanonicalFile().equals(dstFile.getCanonicalFile())) return true;
+        }
+        catch (IOException error) {
+            return false;
+        }
         if (isSymlink(srcFile)) {
             String linkTarget = readSymlink(srcFile);
             if (linkTarget == null || linkTarget.isEmpty()) return false;

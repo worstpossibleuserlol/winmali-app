@@ -26,6 +26,17 @@ public class FileUtilsTest {
     }
 
     @Test
+    public void copyingDirectoryOntoItselfDoesNotRecurse() throws IOException {
+        File directory = new File(temporaryFolder.getRoot(), "same-directory");
+        assertTrue(new File(directory, "nested").mkdirs());
+        Files.write(new File(directory, "nested/file.txt").toPath(),
+            "preserve".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        assertTrue(FileUtils.copy(directory, directory));
+        assertEquals("preserve", FileUtils.readString(new File(directory, "nested/file.txt")));
+    }
+
+    @Test
     public void copyingAFileOntoItselfDoesNotTruncateIt() throws IOException {
         File file = new File(temporaryFolder.getRoot(), "same-file.txt");
         Files.write(file.toPath(), "preserve-me".getBytes(java.nio.charset.StandardCharsets.UTF_8));
