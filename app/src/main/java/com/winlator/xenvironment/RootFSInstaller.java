@@ -79,14 +79,21 @@ public abstract class RootFSInstaller {
     }
 
     public static void install(final MainActivity activity) {
-        ensureInstalled(activity, null);
+        // Explicit Settings action: force a clean reinstall even when the current
+        // rootfs passes the readiness check.
+        ensureInstalled(activity, null, true);
     }
 
     public static void installIfNeeded(final MainActivity activity) {
-        ensureInstalled(activity, null);
+        ensureInstalled(activity, null, false);
     }
 
     public static void ensureInstalled(final Context context, final Callback<Boolean> callback) {
+        ensureInstalled(context, callback, false);
+    }
+
+    private static void ensureInstalled(final Context context, final Callback<Boolean> callback,
+            boolean forceReinstall) {
         if (context == null) {
             if (callback != null) callback.call(false);
             return;
@@ -95,7 +102,7 @@ public abstract class RootFSInstaller {
         Context appContext = context.getApplicationContext();
         if (appContext == null) appContext = context;
 
-        if (isReady(appContext)) {
+        if (!forceReinstall && isReady(appContext)) {
             if (callback != null) new Handler(context.getMainLooper()).post(() -> callback.call(true));
             return;
         }
