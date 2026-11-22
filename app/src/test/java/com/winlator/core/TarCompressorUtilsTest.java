@@ -61,6 +61,7 @@ public class TarCompressorUtilsTest {
                 String entryName = spec.type == TarArchiveEntry.LF_DIR && !spec.name.endsWith("/")
                     ? spec.name + "/" : spec.name;
                 TarArchiveEntry entry = new TarArchiveEntry(entryName, spec.type, spec.preserveAbsolutePath);
+                // TAR symbolic links and hard links both store their target in linkname.
                 if (spec.type == TarArchiveEntry.LF_SYMLINK || spec.type == TarArchiveEntry.LF_LINK) {
                     entry.setLinkName(spec.linkName);
                 }
