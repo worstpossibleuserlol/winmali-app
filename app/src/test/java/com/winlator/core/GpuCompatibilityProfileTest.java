@@ -71,13 +71,13 @@ public class GpuCompatibilityProfileTest {
     }
 
     @Test
-    public void vkd3dIsNeverChosenAsTheAutomaticDefault() {
+    public void vkd3dIsNeverChosenAsTheAutomaticDefaultOnMali() {
         GpuCompatibilityProfile profile = GpuCompatibilityProfile.resolve(
             "Mali-G720", "ARM", vk(1, 3, 0),
             new String[]{"VK_KHR_swapchain", "VK_KHR_synchronization2",
                 "VK_EXT_descriptor_indexing", "VK_KHR_timeline_semaphore"});
         assertTrue(profile.supportsVkd3dBaseline);
-        assertEquals(DXWrappers.DXVK, profile.dxWrapper);
+        assertEquals(DXWrappers.WINED3D, profile.dxWrapper);
         assertNotEquals(DXWrappers.VKD3D, profile.dxWrapper);
     }
 }
