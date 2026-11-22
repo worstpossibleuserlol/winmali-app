@@ -1197,8 +1197,8 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         // Keep the existing separate PulseAudio payload and extraction location.
         if (!TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
             "pulseaudio.tzst", new File(getFilesDir(), "pulseaudio"))) {
-            android.util.Log.e("WinMali-FileManager", "Unable to apply PulseAudio system files");
-            return false;
+            // Preserve the pre-existing non-fatal PulseAudio fallback behaviour.
+            android.util.Log.w("WinMali-FileManager", "Unable to refresh PulseAudio files");
         }
 
         WineUtils.applySystemTweaks(this, wineInfo);
