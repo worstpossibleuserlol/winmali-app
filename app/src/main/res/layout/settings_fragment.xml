@@ -30,6 +30,19 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
                         android:text="@string/gpu_diagnostics" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/compatibility_runtime_bundle_description" />
+
+                    <Button
+                        android:id="@+id/BTCompatibilityRuntimeBundle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/compatibility_runtime_bundle" />
                 </LinearLayout>
 
                 <TextView
