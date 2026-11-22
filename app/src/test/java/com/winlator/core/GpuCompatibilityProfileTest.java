@@ -30,6 +30,23 @@ public class GpuCompatibilityProfileTest {
             new String[]{"VK_KHR_swapchain"});
         assertEquals(GpuCompatibilityProfile.Vendor.ADRENO, profile.vendor);
         assertEquals(GraphicsDrivers.TURNIP, profile.vulkanDriver);
+        assertEquals(DXWrappers.DXVK, profile.dxWrapper);
+    }
+
+    @Test
+    public void automaticMaliFallbackProtectsExistingContainersButPreservesManualChoice() {
+        assertEquals(DXWrappers.WINED3D,
+            GpuCompatibilityProfile.resolveDXWrapperForLaunch(
+                DXWrappers.DXVK, GpuCompatibilityProfile.Vendor.MALI, true));
+        assertEquals(DXWrappers.DXVK,
+            GpuCompatibilityProfile.resolveDXWrapperForLaunch(
+                DXWrappers.DXVK, GpuCompatibilityProfile.Vendor.MALI, false));
+        assertEquals(GraphicsDrivers.VORTEK,
+            GpuCompatibilityProfile.resolveVulkanDriverForLaunch(
+                GraphicsDrivers.TURNIP, GpuCompatibilityProfile.Vendor.MALI, true));
+        assertEquals(GraphicsDrivers.TURNIP,
+            GpuCompatibilityProfile.resolveVulkanDriverForLaunch(
+                GraphicsDrivers.TURNIP, GpuCompatibilityProfile.Vendor.MALI, false));
     }
 
     @Test
