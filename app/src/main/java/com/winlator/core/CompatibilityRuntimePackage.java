@@ -46,9 +46,9 @@ public final class CompatibilityRuntimePackage {
         String[] secondParts = secondMatcher.group(1).split("\\.");
         int count = Math.max(firstParts.length, secondParts.length);
         for (int i = 0; i < count; i++) {
-            long firstPart = i < firstParts.length ? Long.parseLong(firstParts[i]) : 0L;
-            long secondPart = i < secondParts.length ? Long.parseLong(secondParts[i]) : 0L;
-            int compared = Long.compare(firstPart, secondPart);
+            String firstPart = i < firstParts.length ? firstParts[i] : "0";
+            String secondPart = i < secondParts.length ? secondParts[i] : "0";
+            int compared = compareNumericSegments(firstPart, secondPart);
             if (compared != 0) return compared;
         }
 
@@ -57,6 +57,13 @@ public final class CompatibilityRuntimePackage {
         if (firstSuffix.isEmpty() && !secondSuffix.isEmpty()) return 1;
         if (!firstSuffix.isEmpty() && secondSuffix.isEmpty()) return -1;
         return firstSuffix.compareToIgnoreCase(secondSuffix);
+    }
+
+    private static int compareNumericSegments(String first, String second) {
+        String normalizedFirst = first.replaceFirst("^0+(?!$)", "");
+        String normalizedSecond = second.replaceFirst("^0+(?!$)", "");
+        int lengthComparison = Integer.compare(normalizedFirst.length(), normalizedSecond.length());
+        return lengthComparison != 0 ? lengthComparison : normalizedFirst.compareTo(normalizedSecond);
     }
 
     public static String normalizeRelativePath(String path) {
