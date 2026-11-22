@@ -665,7 +665,14 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         guestProgramLauncherComponent.setEnvVars(envVars);
-        guestProgramLauncherComponent.setTerminationCallback((status) -> exit());
+        guestProgramLauncherComponent.setTerminationCallback((status) -> {
+            android.util.Log.e("WinMali-Launch", "Wine/Box64 session exited with status "+status);
+            runOnUiThread(() -> {
+                if (!isFinishing() && !isDestroyed()) exit();
+            });
+        });
+        guestProgramLauncherComponent.setOutputCallback((line) ->
+            android.util.Log.i("WinMali-Guest", line));
         environment.addComponent(guestProgramLauncherComponent);
 
         if (isGenerateWineprefix()) {
@@ -676,9 +683,21 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             envVars.putAll(overrideEnvVars);
             overrideEnvVars = null;
         }
-        environment.startEnvironmentComponents();
 
-        winHandler.start();
+        // winhandler.exe sends its initial UDP handshake immediately. Bind the
+        // Android listener synchronously before starting Box64/Wine or that first
+        // packet can be lost and applications will never appear.
+        if (!winHandler.start()) {
+            android.util.Log.e("WinMali-Launch", "Unable to start WinHandler UDP listener on port 7947");
+            runOnUiThread(() -> {
+                preloaderDialog.closeOnUiThread();
+                AppUtils.showToast(this, R.string.winhandler_start_failed);
+                finish();
+            });
+            return;
+        }
+
+        environment.startEnvironmentComponents();
         envVars.clear();
         graphicsDriver = null;
         dxwrapperConfig = null;
