@@ -286,6 +286,10 @@ public class ControlElement {
         return iconId;
     }
 
+    public static boolean isValidIconId(int iconId, int iconCount) {
+        return iconId > 0 && iconId < iconCount;
+    }
+
     public void setIconId(int iconId) {
         this.iconId = (byte)iconId;
     }
@@ -461,8 +465,9 @@ public class ControlElement {
                     }
                 }
 
-                if (iconId > 0) {
-                    drawIcon(canvas, cx, cy, boundingBox.width(), boundingBox.height(), iconId, true);
+                Bitmap icon = iconId > 0 ? inputControlsView.getIcon(iconId) : null;
+                if (icon != null && !icon.isRecycled()) {
+                    drawIcon(canvas, cx, cy, boundingBox.width(), boundingBox.height(), icon, true);
                 }
                 else {
                     String text = getDisplayText();
@@ -738,7 +743,11 @@ public class ControlElement {
                         startAngle = endAngle;
                     }
 
-                    drawIcon(canvas, cx, cy, boundingBox.width() * 0.4f, boundingBox.width() * 0.4f, 17, false);
+                    Bitmap radialIcon = inputControlsView.getIcon((byte)17);
+                    if (radialIcon != null && !radialIcon.isRecycled()) {
+                        drawIcon(canvas, cx, cy, boundingBox.width() * 0.4f,
+                            boundingBox.width() * 0.4f, radialIcon, false);
+                    }
                 }
                 else {
                     paint.setStyle(Paint.Style.FILL_AND_STROKE);
@@ -754,9 +763,9 @@ public class ControlElement {
         }
     }
 
-    private void drawIcon(Canvas canvas, float cx, float cy, float width, float height, int iconId, boolean automargin) {
+    private void drawIcon(Canvas canvas, float cx, float cy, float width, float height, Bitmap icon, boolean automargin) {
+        if (icon == null || icon.isRecycled()) return;
         Paint paint = inputControlsView.getPaint();
-        Bitmap icon = inputControlsView.getIcon((byte)iconId);
         paint.setColorFilter(propertyFlags.isSet(FLAG_PRESSED) ? inputControlsView.getDarkColorFilter() : inputControlsView.getLightColorFilter());
         float snappingSize = inputControlsView.getSnappingSize();
         int margin = automargin ? (int)(snappingSize * (shape == Shape.CIRCLE || shape == Shape.SQUARE ? 2.0f : 1.0f) * scale) : 0;

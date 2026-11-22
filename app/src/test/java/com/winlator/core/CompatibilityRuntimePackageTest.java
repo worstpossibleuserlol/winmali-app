@@ -25,6 +25,17 @@ public class CompatibilityRuntimePackageTest {
     }
 
     @Test
+    public void comparesTaggedVersionsByTheirNumericSegments() {
+        assertTrue(CompatibilityRuntimePackage.compareVersionNames("3.0b", "2.14.1") > 0);
+        assertTrue(CompatibilityRuntimePackage.compareVersionNames("3.0b", "3.0") < 0);
+        assertTrue(CompatibilityRuntimePackage.compareVersionNames("10.0", "2.9") > 0);
+        assertTrue(CompatibilityRuntimePackage.compareVersionNames("3.0-rc2", "3.0-rc1") > 0);
+        assertEquals(0, CompatibilityRuntimePackage.compareVersionNames("3.0", "3.0.0"));
+        assertTrue(CompatibilityRuntimePackage.compareVersionNames(
+            "100000000000000000000000.0", "99999999999999999999999.9") > 0);
+    }
+
+    @Test
     public void normalizesDotPrefixedArchivePaths() {
         assertEquals("usr/local/bin/box64",
             CompatibilityRuntimePackage.normalizeRelativePath("./usr/local/bin/box64"));

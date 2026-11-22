@@ -208,11 +208,13 @@ public class InputControlsView extends View {
     }
 
     public synchronized void setProfile(ControlsProfile profile) {
+        if (this.profile != profile) cancelMouseMoveTimer();
+        this.profile = profile;
         if (profile != null) {
-            this.profile = profile;
             deselectAllElements();
+            if (hasMouseMovement()) createMouseMoveTimer();
         }
-        else this.profile = null;
+        else selectedElement = null;
     }
 
     public boolean isShowTouchscreenControls() {
@@ -258,9 +260,30 @@ public class InputControlsView extends View {
         return xServer;
     }
 
-    public void setXServer(XServer xServer) {
+    public synchronized void setXServer(XServer xServer) {
+        if (this.xServer != xServer) cancelMouseMoveTimer();
         this.xServer = xServer;
         createMouseMoveTimer();
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        createMouseMoveTimer();
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        cancelMouseMoveTimer();
+        super.onDetachedFromWindow();
+    }
+
+    private synchronized void cancelMouseMoveTimer() {
+        if (mouseMoveTimer != null) {
+            mouseMoveTimer.cancel();
+            mouseMoveTimer.purge();
+            mouseMoveTimer = null;
+        }
     }
 
     public int getMaxWidth() {
@@ -271,17 +294,26 @@ public class InputControlsView extends View {
         return (int)Mathf.roundTo(getHeight(), snappingSize);
     }
 
-    private void createMouseMoveTimer() {
-        if (profile != null && mouseMoveTimer == null) {
-            final float cursorSpeed = profile.getCursorSpeed();
-            mouseMoveTimer = new Timer();
-            mouseMoveTimer.schedule(new TimerTask() {
-                @Override
-                public void run() {
-                    xServer.injectPointerMoveDelta((int)(mouseMoveOffset.x * 10 * cursorSpeed), (int)(mouseMoveOffset.y * 10 * cursorSpeed));
-                }
-            }, 0, 1000 / 60);
-        }
+    private boolean hasMouseMovement() {
+        return mouseMoveOffset.x != 0.0f || mouseMoveOffset.y != 0.0f;
+    }
+
+    private synchronized void createMouseMoveTimer() {
+        if (profile == null || xServer == null || !hasMouseMovement() ||
+            mouseMoveTimer != null || !isAttachedToWindow()) return;
+        final XServer activeXServer = xServer;
+        mouseMoveTimer = new Timer("WinMali-mouse-move", true);
+        mouseMoveTimer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                ControlsProfile activeProfile = profile;
+                if (!isAttachedToWindow() || activeProfile == null || xServer != activeXServer) return;
+                float cursorSpeed = activeProfile.getCursorSpeed();
+                activeXServer.injectPointerMoveDelta(
+                    (int)(mouseMoveOffset.x * 10 * cursorSpeed),
+                    (int)(mouseMoveOffset.y * 10 * cursorSpeed));
+            }
+        }, 0, 1000 / 60);
     }
 
     private void processJoystickInput(ExternalController controller) {
@@ -481,10 +513,12 @@ public class InputControlsView extends View {
             if (binding == Binding.MOUSE_MOVE_LEFT || binding == Binding.MOUSE_MOVE_RIGHT) {
                 mouseMoveOffset.x = isActionDown ? (offset != 0 ? offset : (binding == Binding.MOUSE_MOVE_LEFT ? -1 : 1)) : 0;
                 if (isActionDown) createMouseMoveTimer();
+                else if (!hasMouseMovement()) cancelMouseMoveTimer();
             }
             else if (binding == Binding.MOUSE_MOVE_DOWN || binding == Binding.MOUSE_MOVE_UP) {
                 mouseMoveOffset.y = isActionDown ? (offset != 0 ? offset : (binding == Binding.MOUSE_MOVE_UP ? -1 : 1)) : 0;
                 if (isActionDown) createMouseMoveTimer();
+                else if (!hasMouseMovement()) cancelMouseMoveTimer();
             }
             else if (binding.keycode.isCustomKey()) {
                 if (!isActionDown) handleCommandKeyEvent(binding);
@@ -508,12 +542,15 @@ public class InputControlsView extends View {
     }
 
     public Bitmap getIcon(byte id) {
+        if (!ControlElement.isValidIconId(id, icons.length)) return null;
         if (icons[id] == null) {
             Context context = getContext();
             try (InputStream is = context.getAssets().open("inputcontrols/icons/"+id+".png")) {
                 icons[id] = BitmapFactory.decodeStream(is);
             }
-            catch (IOException e) {}
+            catch (IOException | RuntimeException error) {
+                return null;
+            }
         }
         return icons[id];
     }

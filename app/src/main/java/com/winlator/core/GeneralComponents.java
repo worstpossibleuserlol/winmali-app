@@ -676,7 +676,7 @@ public abstract class GeneralComponents {
         items.addAll(getInstalledComponentNames(type, spinner.getContext()));
 
         if (type.isVersioned()) {
-            items.sort((o1, o2) -> Integer.compare(GPUHelper.vkMakeVersion(o1), GPUHelper.vkMakeVersion(o2)));
+            items.sort(CompatibilityRuntimePackage::compareVersionNames);
         }
 
         spinner.setAdapter(new ArrayAdapter<>(spinner.getContext(), android.R.layout.simple_spinner_dropdown_item, items));

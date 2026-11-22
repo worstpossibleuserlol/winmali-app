@@ -24,6 +24,48 @@ public final class CompatibilityRuntimePackage {
             !version.contains("..") && !version.endsWith(".");
     }
 
+    /**
+     * Compares numeric version segments first, then prerelease/build suffixes.
+     * This keeps tags such as "3.0b" in the correct place instead of treating
+     * them as version zero in the component selector.
+     */
+    public static int compareVersionNames(String first, String second) {
+        if (first == second) return 0;
+        if (first == null) return -1;
+        if (second == null) return 1;
+
+        java.util.regex.Matcher firstMatcher =
+            Pattern.compile("^([0-9]+(?:\\.[0-9]+){1,3})(.*)$").matcher(first);
+        java.util.regex.Matcher secondMatcher =
+            Pattern.compile("^([0-9]+(?:\\.[0-9]+){1,3})(.*)$").matcher(second);
+        if (!firstMatcher.matches() || !secondMatcher.matches()) {
+            return first.compareToIgnoreCase(second);
+        }
+
+        String[] firstParts = firstMatcher.group(1).split("\\.");
+        String[] secondParts = secondMatcher.group(1).split("\\.");
+        int count = Math.max(firstParts.length, secondParts.length);
+        for (int i = 0; i < count; i++) {
+            String firstPart = i < firstParts.length ? firstParts[i] : "0";
+            String secondPart = i < secondParts.length ? secondParts[i] : "0";
+            int compared = compareNumericSegments(firstPart, secondPart);
+            if (compared != 0) return compared;
+        }
+
+        String firstSuffix = firstMatcher.group(2);
+        String secondSuffix = secondMatcher.group(2);
+        if (firstSuffix.isEmpty() && !secondSuffix.isEmpty()) return 1;
+        if (!firstSuffix.isEmpty() && secondSuffix.isEmpty()) return -1;
+        return firstSuffix.compareToIgnoreCase(secondSuffix);
+    }
+
+    private static int compareNumericSegments(String first, String second) {
+        String normalizedFirst = first.replaceFirst("^0+(?!$)", "");
+        String normalizedSecond = second.replaceFirst("^0+(?!$)", "");
+        int lengthComparison = Integer.compare(normalizedFirst.length(), normalizedSecond.length());
+        return lengthComparison != 0 ? lengthComparison : normalizedFirst.compareTo(normalizedSecond);
+    }
+
     public static String normalizeRelativePath(String path) {
         if (path == null || path.isEmpty()) return null;
         String normalized = path.replace('\\', '/');
