@@ -108,17 +108,30 @@ public class WineInstallerTest {
     public void resolvesManifestDeclaredWineExecutableOutsideLegacyBinDirectory() throws IOException {
         File root = temporaryFolder.getRoot();
         File expected = createAarch64Elf(new File(root, "usr/bin/custom-wine"));
+        File wineLibraries = new File(root, "lib/wine");
+        assertTrue(new File(wineLibraries, "i386-windows").mkdirs());
+        assertTrue(new File(wineLibraries, "x86_64-windows").mkdirs());
+        String manifest = "{\"engine\":\"WINE\",\"version\":\"10.10\",\"hostAbi\":\"arm64-v8a\","+
+            "\"entrypoint\":\"usr/bin/custom-wine\",\"wineExecutable\":\"usr/bin/custom-wine\","+
+            "\"wineLibraryRoot\":\"lib/wine\",\"guestArchitectures\":[\"x86\",\"x86_64\"]}";
+        assertTrue(FileUtils.writeString(new File(root, CompatibilityRuntimeManifest.FILE_NAME), manifest));
 
-        assertEquals(expected, WineInstaller.findWineExecutable(root, "usr/bin/custom-wine"));
+        assertEquals(expected, WineInstaller.findWineExecutable(root));
     }
 
     @Test
     public void rejectsUnsafeManifestDeclaredWineExecutablePath() throws IOException {
         File root = temporaryFolder.getRoot();
-        createAarch64Elf(new File(root, "usr/bin/custom-wine"));
+        File expected = createAarch64Elf(new File(root, "usr/bin/custom-wine"));
+        File wineLibraries = new File(root, "lib/wine");
+        assertTrue(new File(wineLibraries, "i386-windows").mkdirs());
+        assertTrue(new File(wineLibraries, "x86_64-windows").mkdirs());
+        String manifest = "{\"engine\":\"WINE\",\"version\":\"10.10\",\"hostAbi\":\"arm64-v8a\","+
+            "\"entrypoint\":\"../custom-wine\",\"wineExecutable\":\"../custom-wine\","+
+            "\"wineLibraryRoot\":\"lib/wine\",\"guestArchitectures\":[\"x86\",\"x86_64\"]}";
+        assertTrue(FileUtils.writeString(new File(root, CompatibilityRuntimeManifest.FILE_NAME), manifest));
 
-        assertNull(WineInstaller.findWineExecutable(root, "../outside-wine"));
-        assertNull(WineInstaller.findWineExecutable(root, "/usr/bin/custom-wine"));
+        assertNull(WineInstaller.findWineExecutable(root));
     }
 
 }
