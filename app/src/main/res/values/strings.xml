@@ -399,4 +399,6 @@
     <string name="fgs_notification_content_else">WinMali is running in the background</string>
     <string name="save_mem_on_run_from_steam">Save memory on run from Steam</string>
     <string name="present_mode">Present Mode</string>
+    <string name="compatibility_runtime_bundle">Compatibility Runtime Bundle</string>
+    <string name="compatibility_runtime_bundle_description">View Wine and Proton release references, Android host requirements, and supported Windows guest architectures.</string>
 </resources>
