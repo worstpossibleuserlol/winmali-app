@@ -31,4 +31,14 @@ public class ControlsProfileTest {
         assertNull(profile.addController(null));
         assertNull(profile.addController(""));
     }
+
+    @Test
+    public void overlayIconIdsAreCheckedBeforeArrayAccess() {
+        assertTrue(ControlElement.isValidIconId(1, 18));
+        assertTrue(ControlElement.isValidIconId(17, 18));
+        assertFalse(ControlElement.isValidIconId(0, 18));
+        assertFalse(ControlElement.isValidIconId(18, 18));
+        assertFalse(ControlElement.isValidIconId(127, 18));
+        assertFalse(ControlElement.isValidIconId(-1, 18));
+    }
 }
