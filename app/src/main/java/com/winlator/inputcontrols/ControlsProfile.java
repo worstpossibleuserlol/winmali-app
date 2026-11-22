@@ -102,8 +102,10 @@ public class ControlsProfile implements Comparable<ControlsProfile>, GamepadSlot
     }
 
     public ExternalController addController(String id) {
+        if (id == null || id.isEmpty()) return null;
         ExternalController controller = getController(id);
-        if (controller == null) controllers.add(controller = ExternalController.getController(id));
+        if (controller == null) controller = ExternalController.getController(id);
+        if (controller != null && !controllers.contains(controller)) controllers.add(controller);
         controllersLoaded = true;
         return controller;
     }
@@ -115,7 +117,10 @@ public class ControlsProfile implements Comparable<ControlsProfile>, GamepadSlot
 
     public ExternalController getController(String id) {
         if (!controllersLoaded) loadControllers();
-        for (ExternalController controller : controllers) if (controller.getId().equals(id)) return controller;
+        if (id == null) return null;
+        for (ExternalController controller : controllers) {
+            if (controller != null && id.equals(controller.getId())) return controller;
+        }
         return null;
     }
 
@@ -140,7 +145,9 @@ public class ControlsProfile implements Comparable<ControlsProfile>, GamepadSlot
         return elementsLoaded;
     }
 
-    public void save() {
+    public boolean save() {
+        if (context == null || id < 0 || name == null || name.trim().isEmpty() ||
+            !Float.isFinite(cursorSpeed)) return false;
         File file = getProfileFile(context, id);
 
         try {
@@ -172,9 +179,12 @@ public class ControlsProfile implements Comparable<ControlsProfile>, GamepadSlot
             }
             if (controllersJSONArray.length() > 0) data.put("controllers", controllersJSONArray);
 
-            FileUtils.writeString(file, data.toString());
+            return FileUtils.writeString(file, data.toString());
         }
-        catch (JSONException e) {}
+        catch (JSONException | RuntimeException error) {
+            android.util.Log.w("WinMali-Controls", "Unable to save control profile", error);
+            return false;
+        }
     }
 
     public static File getProfileFile(Context context, int id) {
@@ -196,53 +206,61 @@ public class ControlsProfile implements Comparable<ControlsProfile>, GamepadSlot
     }
 
     public boolean isTemplate() {
-        return name.toLowerCase(Locale.ENGLISH).contains("template");
+        return name != null && name.toLowerCase(Locale.ENGLISH).contains("template");
     }
 
     public ArrayList<ExternalController> loadControllers() {
         controllers.clear();
-        controllersLoaded = false;
+        controllersLoaded = true;
 
         File file = getProfileFile(context, id);
-        if (!file.isFile()) return controllers;
+        if (!file.isFile() || FileUtils.isSymlink(file)) return controllers;
 
+        ArrayList<ExternalController> loadedControllers = new ArrayList<>();
         try {
             JSONObject profileJSONObject = new JSONObject(FileUtils.readString(file));
             if (!profileJSONObject.has("controllers")) return controllers;
             JSONArray controllersJSONArray = profileJSONObject.getJSONArray("controllers");
             for (int i = 0; i < controllersJSONArray.length(); i++) {
                 JSONObject controllerJSONObject = controllersJSONArray.getJSONObject(i);
-                String id = controllerJSONObject.getString("id");
-                ExternalController controller = new ExternalController();
-                controller.setId(id);
-                controller.setName(controllerJSONObject.getString("name"));
+                String controllerId = controllerJSONObject.getString("id");
+                String controllerName = controllerJSONObject.getString("name");
+                if (controllerId.isEmpty() || controllerName.trim().isEmpty()) continue;
 
-                JSONArray controllerBindingsJSONArray = controllerJSONObject.getJSONArray("controllerBindings");
-                for (int j = 0; j < controllerBindingsJSONArray.length(); j++) {
-                    JSONObject controllerBindingJSONObject = controllerBindingsJSONArray.getJSONObject(j);
-                    ExternalControllerBinding controllerBinding = new ExternalControllerBinding();
-                    controllerBinding.setKeyCode(controllerBindingJSONObject.getInt("keyCode"));
-                    controllerBinding.setBinding(Binding.fromString(controllerBindingJSONObject.getString("binding")));
-                    controller.addControllerBinding(controllerBinding);
+                ExternalController controller = new ExternalController();
+                controller.setId(controllerId);
+                controller.setName(controllerName);
+
+                JSONArray bindings = controllerJSONObject.getJSONArray("controllerBindings");
+                for (int j = 0; j < bindings.length(); j++) {
+                    JSONObject bindingJson = bindings.getJSONObject(j);
+                    ExternalControllerBinding binding = new ExternalControllerBinding();
+                    binding.setKeyCode(bindingJson.getInt("keyCode"));
+                    binding.setBinding(Binding.fromString(bindingJson.getString("binding")));
+                    controller.addControllerBinding(binding);
                 }
-                controllers.add(controller);
+                loadedControllers.add(controller);
             }
-            controllersLoaded = true;
         }
-        catch (JSONException e) {
-            e.printStackTrace();
+        catch (JSONException | RuntimeException error) {
+            android.util.Log.w("WinMali-Controls", "Ignoring malformed controller profile data", error);
+            loadedControllers.clear();
         }
+
+        controllers.addAll(loadedControllers);
         return controllers;
     }
 
     public void loadElements(InputControlsView inputControlsView) {
         elements.clear();
-        elementsLoaded = false;
+        elementsLoaded = true;
         virtualGamepad = false;
 
         File file = getProfileFile(context, id);
-        if (!file.isFile()) return;
+        if (!file.isFile() || FileUtils.isSymlink(file)) return;
 
+        ArrayList<ControlElement> loadedElements = new ArrayList<>();
+        boolean loadedVirtualGamepad = false;
         try {
             JSONObject profileJSONObject = new JSONObject(FileUtils.readString(file));
             JSONArray elementsJSONArray = profileJSONObject.getJSONArray("elements");
@@ -268,19 +286,27 @@ public class ControlsProfile implements Comparable<ControlsProfile>, GamepadSlot
 
                 boolean hasGamepadBinding = true;
                 JSONArray bindingsJSONArray = elementJSONObject.getJSONArray("bindings");
+                if (bindingsJSONArray.length() > 64) {
+                    throw new IllegalArgumentException("Control profile contains too many bindings");
+                }
                 for (int j = 0; j < bindingsJSONArray.length(); j++) {
                     Binding binding = Binding.fromString(bindingsJSONArray.getString(j));
-                    if (element != null) element.setBindingAt(j, Binding.fromString(bindingsJSONArray.getString(j)));
+                    if (element != null) element.setBindingAt(j, binding);
                     if (!binding.isGamepad()) hasGamepadBinding = false;
                 }
 
-                if (!virtualGamepad && hasGamepadBinding) virtualGamepad = true;
-                if (element != null) elements.add(element);
+                if (!loadedVirtualGamepad && hasGamepadBinding) loadedVirtualGamepad = true;
+                if (element != null) loadedElements.add(element);
             }
-            elementsLoaded = true;
+            elements.addAll(loadedElements);
+            virtualGamepad = loadedVirtualGamepad;
         }
-        catch (JSONException e) {
-            e.printStackTrace();
+        catch (JSONException | RuntimeException error) {
+            // Treat malformed imported bindings as invalid profile data. The overlay
+            // should not crash or retry parsing the same bad file on every draw.
+            android.util.Log.w("WinMali-Controls", "Ignoring malformed touchscreen profile data", error);
+            elements.clear();
+            virtualGamepad = false;
         }
     }
 }
