@@ -75,6 +75,7 @@ public class ContainerManager {
     private synchronized void loadContainers() {
         containers.clear();
         maxContainerId = 0;
+        if (!isHomeDirSafe()) return;
 
         File[] files = homeDir.listFiles();
         if (files == null) return;
@@ -106,6 +107,32 @@ public class ContainerManager {
         }
     }
 
+    private boolean isHomeDirSafe() {
+        File rootDir = homeDir.getParentFile();
+        if (rootDir == null || FileUtils.isSymlink(rootDir) || FileUtils.isSymlink(homeDir) ||
+            !rootDir.isDirectory() || !homeDir.isDirectory() || !homeDir.canWrite()) return false;
+        try {
+            String expected = new File(rootDir.getCanonicalFile(), "home").getCanonicalPath();
+            return homeDir.getCanonicalPath().equals(expected);
+        }
+        catch (IOException | SecurityException error) {
+            return false;
+        }
+    }
+
+    private boolean isManagedContainerDirectory(Container container) {
+        if (!isHomeDirSafe() || container == null || container.getRootDir() == null ||
+            FileUtils.isSymlink(container.getRootDir()) || !container.getRootDir().isDirectory()) return false;
+        File expected = new File(homeDir, RootFS.USER+"-"+container.id);
+        try {
+            return container.getRootDir().getCanonicalFile().equals(expected.getCanonicalFile()) &&
+                expected.getParentFile().getCanonicalFile().equals(homeDir.getCanonicalFile());
+        }
+        catch (IOException | SecurityException error) {
+            return false;
+        }
+    }
+
     private int nextAvailableContainerId() {
         long candidate = Math.max(1L, (long)maxContainerId + 1L);
         while (candidate <= Integer.MAX_VALUE) {
@@ -117,7 +144,7 @@ public class ContainerManager {
     }
 
     public synchronized boolean activateContainer(Container container) {
-        if (container == null || getContainerById(container.id) == null) return false;
+        if (!isManagedContainerDirectory(container) || getContainerById(container.id) == null) return false;
 
         File activeLink = new File(homeDir, RootFS.USER);
         File temporaryLink = new File(homeDir, RootFS.USER+".new");
@@ -204,8 +231,7 @@ public class ContainerManager {
             boolean success = false;
             File archive = null;
             try {
-                if (container != null && container.getRootDir() != null &&
-                    container.getRootDir().isDirectory() && destinationUri != null &&
+                if (isManagedContainerDirectory(container) && destinationUri != null &&
                     !isActiveContainer(container)) {
                     archive = new File(context.getCacheDir(), "winmali-export-"+UUID.randomUUID()+".tar.zst");
                     success = TarCompressorUtils.compress(TarCompressorUtils.Type.ZSTD,
@@ -272,9 +298,12 @@ public class ContainerManager {
         if (directory == null || !directory.isDirectory()) return null;
         File config = new File(directory, ".container");
         File wine = new File(directory, ".wine");
-        File windows = new File(wine, "drive_c/windows");
+        File driveC = new File(wine, "drive_c");
+        File windows = new File(driveC, "windows");
         if (config.isFile() && !FileUtils.isSymlink(config) &&
-            wine.isDirectory() && !FileUtils.isSymlink(wine) && windows.isDirectory()) return directory;
+            wine.isDirectory() && !FileUtils.isSymlink(wine) &&
+            driveC.isDirectory() && !FileUtils.isSymlink(driveC) &&
+            windows.isDirectory() && !FileUtils.isSymlink(windows)) return directory;
         if (depth <= 0) return null;
         File[] children = directory.listFiles();
         if (children == null) return null;
@@ -288,7 +317,8 @@ public class ContainerManager {
     }
 
     private synchronized Container installImportedContainer(File backupRoot) {
-        if (backupRoot == null || !backupRoot.isDirectory()) return null;
+        if (!isHomeDirSafe() || backupRoot == null || !backupRoot.isDirectory() ||
+            FileUtils.isSymlink(backupRoot)) return null;
         try {
             JSONObject data = new JSONObject(FileUtils.readString(new File(backupRoot, ".container")));
             Container container = new Container(nextAvailableContainerId());
@@ -337,6 +367,10 @@ public class ContainerManager {
         File stagingDir = null;
         lastCreateError = R.string.container_create_failed;
         try {
+            if (!isHomeDirSafe()) {
+                lastCreateError = R.string.container_create_storage_error;
+                return null;
+            }
             if (data == null) {
                 lastCreateError = R.string.container_create_invalid_settings;
                 return null;
@@ -509,8 +543,7 @@ public class ContainerManager {
     }
 
     private synchronized boolean duplicateContainer(Container srcContainer) {
-        if (srcContainer == null || srcContainer.getRootDir() == null ||
-            !srcContainer.getRootDir().isDirectory() || FileUtils.isSymlink(srcContainer.getRootDir())) return false;
+        if (!isManagedContainerDirectory(srcContainer) || getContainerById(srcContainer.id) == null) return false;
         int id = nextAvailableContainerId();
 
         File dstDir = new File(homeDir, RootFS.USER+"-"+id);
@@ -544,8 +577,8 @@ public class ContainerManager {
     }
 
     private synchronized boolean removeContainer(Container container) {
-        if (container == null || container.getRootDir() == null ||
-            FileUtils.isSymlink(container.getRootDir()) || isActiveContainer(container)) return false;
+        if (!isManagedContainerDirectory(container) || getContainerById(container.id) == null ||
+            isActiveContainer(container)) return false;
 
         if (FileUtils.delete(container.getRootDir())) {
             containers.remove(container);
