@@ -43,7 +43,7 @@ public final class CompatibilityRuntimePackage {
         }
 
         String[] firstParts = firstMatcher.group(1).split("\\.");
-        String[] secondParts = secondMatcher.group(1).split("\\\\.");
+        String[] secondParts = secondMatcher.group(1).split("\\.");
         int count = Math.max(firstParts.length, secondParts.length);
         for (int i = 0; i < count; i++) {
             long firstPart = i < firstParts.length ? Long.parseLong(firstParts[i]) : 0L;
