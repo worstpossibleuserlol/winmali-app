@@ -126,9 +126,11 @@ public abstract class ProcessHelper {
 
     private static int getProcessId(java.lang.Process process) {
         if (process == null) return -1;
+
+        // Resolve pid() from the public java.lang.Process API rather than the
+        // concrete ProcessImpl class. Desktop JVMs expose it here without
+        // module-access errors; older Android runtimes fall through to the PID field.
         try {
-            // Resolve pid() from the public base class reflectively because some
-            // Android compile SDK stubs omit it even when the runtime provides it.
             java.lang.reflect.Method pidMethod = java.lang.Process.class.getMethod("pid");
             Object value = pidMethod.invoke(process);
             if (value instanceof Number) {
@@ -136,8 +138,26 @@ public abstract class ProcessHelper {
                 if (pid > 0 && pid <= Integer.MAX_VALUE) return (int)pid;
             }
         }
-        catch (ReflectiveOperationException | RuntimeException error) {
-            android.util.Log.w("WinMali-Process", "Unable to retrieve child process ID", error);
+        catch (ReflectiveOperationException | RuntimeException ignored) {}
+
+        Class<?> processClass = process.getClass();
+        while (processClass != null) {
+            try {
+                Field pidField = processClass.getDeclaredField("pid");
+                pidField.setAccessible(true);
+                Object value = pidField.get(process);
+                if (value instanceof Number) {
+                    long pid = ((Number)value).longValue();
+                    if (pid > 0 && pid <= Integer.MAX_VALUE) return (int)pid;
+                }
+                return -1;
+            }
+            catch (NoSuchFieldException error) {
+                processClass = processClass.getSuperclass();
+            }
+            catch (ReflectiveOperationException | RuntimeException error) {
+                return -1;
+            }
         }
         return -1;
     }
