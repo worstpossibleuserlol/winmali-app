@@ -5,6 +5,7 @@ import android.content.Context;
 import androidx.annotation.NonNull;
 
 import com.winlator.core.FileUtils;
+import com.winlator.core.CompatibilityRuntimePackage;
 
 import java.io.File;
 import java.io.IOException;
