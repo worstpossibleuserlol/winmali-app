@@ -208,11 +208,13 @@ public class InputControlsView extends View {
     }
 
     public synchronized void setProfile(ControlsProfile profile) {
+        if (this.profile != profile) cancelMouseMoveTimer();
+        this.profile = profile;
         if (profile != null) {
-            this.profile = profile;
             deselectAllElements();
+            createMouseMoveTimer();
         }
-        else this.profile = null;
+        else selectedElement = null;
     }
 
     public boolean isShowTouchscreenControls() {
@@ -258,9 +260,30 @@ public class InputControlsView extends View {
         return xServer;
     }
 
-    public void setXServer(XServer xServer) {
+    public synchronized void setXServer(XServer xServer) {
+        if (this.xServer != xServer) cancelMouseMoveTimer();
         this.xServer = xServer;
         createMouseMoveTimer();
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        createMouseMoveTimer();
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        cancelMouseMoveTimer();
+        super.onDetachedFromWindow();
+    }
+
+    private synchronized void cancelMouseMoveTimer() {
+        if (mouseMoveTimer != null) {
+            mouseMoveTimer.cancel();
+            mouseMoveTimer.purge();
+            mouseMoveTimer = null;
+        }
     }
 
     public int getMaxWidth() {
@@ -271,17 +294,21 @@ public class InputControlsView extends View {
         return (int)Mathf.roundTo(getHeight(), snappingSize);
     }
 
-    private void createMouseMoveTimer() {
-        if (profile != null && mouseMoveTimer == null) {
-            final float cursorSpeed = profile.getCursorSpeed();
-            mouseMoveTimer = new Timer();
-            mouseMoveTimer.schedule(new TimerTask() {
-                @Override
-                public void run() {
-                    xServer.injectPointerMoveDelta((int)(mouseMoveOffset.x * 10 * cursorSpeed), (int)(mouseMoveOffset.y * 10 * cursorSpeed));
-                }
-            }, 0, 1000 / 60);
-        }
+    private synchronized void createMouseMoveTimer() {
+        if (profile == null || xServer == null || mouseMoveTimer != null || !isAttachedToWindow()) return;
+        final XServer activeXServer = xServer;
+        mouseMoveTimer = new Timer("WinMali-mouse-move", true);
+        mouseMoveTimer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                ControlsProfile activeProfile = profile;
+                if (!isAttachedToWindow() || activeProfile == null || xServer != activeXServer) return;
+                float cursorSpeed = activeProfile.getCursorSpeed();
+                activeXServer.injectPointerMoveDelta(
+                    (int)(mouseMoveOffset.x * 10 * cursorSpeed),
+                    (int)(mouseMoveOffset.y * 10 * cursorSpeed));
+            }
+        }, 0, 1000 / 60);
     }
 
     private void processJoystickInput(ExternalController controller) {
