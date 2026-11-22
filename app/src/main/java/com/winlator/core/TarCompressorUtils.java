@@ -273,9 +273,11 @@ public abstract class TarCompressorUtils {
                 Set<String> seenEntries = new HashSet<>();
                 Set<String> seenDirectories = new HashSet<>();
                 while ((entry = (TarArchiveEntry)tar.getNextEntry()) != null) {
-                    if (!tar.canReadEntryData(entry)) return false;
                     if (++entryCount > MAX_ARCHIVE_ENTRIES) return false;
                     boolean hardLink = entry.isLink() && !entry.isSymbolicLink();
+                    // Commons Compress marks TAR hard-link headers as non-readable because
+                    // they carry no payload; they are resolved from an earlier archive file.
+                    if (!hardLink && !tar.canReadEntryData(entry)) return false;
                     if (!entry.isDirectory() && !entry.isSymbolicLink() && !hardLink && !entry.isFile()) return false;
                     if (entry.getSize() > MAX_EXTRACTED_BYTES) return false;
 
