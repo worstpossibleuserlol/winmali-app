@@ -17,8 +17,6 @@ import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public abstract class WineInstaller {
     private static final ExecutorService OPERATIONS = Executors.newSingleThreadExecutor(runnable -> {
