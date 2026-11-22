@@ -207,7 +207,7 @@ public abstract class WineInstaller {
         return null;
     }
 
-    static File findWineExecutable(File root) {
+    public static File findWineExecutable(File root) {
         if (root == null || !root.isDirectory() || FileUtils.isSymlink(root)) return null;
 
         File manifestFile = new File(root, CompatibilityRuntimeManifest.FILE_NAME);
