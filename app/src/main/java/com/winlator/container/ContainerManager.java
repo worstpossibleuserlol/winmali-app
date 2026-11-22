@@ -140,7 +140,7 @@ public class ContainerManager {
         // installer result instead of racing it and returning a misleading "missing" error.
         RootFSInstaller.ensureInstalled(context, (systemFilesReady) -> {
             if (!systemFilesReady) {
-                lastCreateError = R.string.container_create_system_files_missing;
+                lastCreateError = R.string.container_create_system_files_install_failed;
                 if (callback != null) handler.post(() -> callback.call(null));
                 return;
             }

@@ -110,7 +110,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             }
 
             if (allGranted) RootFSInstaller.installIfNeeded(this);
-            else finish();
+            else AppUtils.showToast(this, R.string.storage_permission_denied_limited);
         }
     }
 

@@ -14,6 +14,8 @@
     <string name="creating_container">Creating Container...</string>
     <string name="container_create_failed">Could not create the container. Check that system files are installed and that the app has enough storage, then try again.</string>
     <string name="container_create_system_files_missing">System files are missing or outdated. Install or update them in Settings, then try again.</string>
+    <string name="container_create_system_files_install_failed">WinMali could not install its system files. Check free storage, then use Settings → Reinstall System Files. See Session Logs for the exact error.</string>
+    <string name="storage_permission_denied_limited">External storage permission was denied. WinMali can still install system files and create containers, but access to shared storage may be limited.</string>
     <string name="container_create_wine_missing">The main Wine executable is missing. Reinstall the system files from Settings.</string>
     <string name="container_create_wine_libraries_missing">Wine system libraries are missing or incomplete. Reinstall the system files from Settings.</string>
     <string name="container_create_pattern_missing">The container template is missing from this app installation. Reinstall WinMali.</string>
