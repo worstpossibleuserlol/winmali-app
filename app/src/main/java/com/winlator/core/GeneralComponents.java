@@ -296,6 +296,24 @@ public abstract class GeneralComponents {
             !filename.contains("..");
     }
 
+    private static boolean isValidZstdArchive(File archive) {
+        if (archive == null || !archive.isFile() || archive.length() < 4) return false;
+        byte[] magic = new byte[4];
+        try (InputStream input = new BufferedInputStream(new java.io.FileInputStream(archive))) {
+            int offset = 0;
+            while (offset < magic.length) {
+                int count = input.read(magic, offset, magic.length-offset);
+                if (count < 0) return false;
+                offset += count;
+            }
+            return (magic[0] & 0xff) == 0x28 && (magic[1] & 0xff) == 0xb5 &&
+                (magic[2] & 0xff) == 0x2f && (magic[3] & 0xff) == 0xfd;
+        }
+        catch (IOException | RuntimeException error) {
+            return false;
+        }
+    }
+
     private static void downloadComponentFile(final Type type, final String filename, final Spinner spinner, final String defaultItem) {
         final Activity activity = (Activity)spinner.getContext();
         if (!isSafeDownloadFilename(type, filename)) {
@@ -312,7 +330,7 @@ public abstract class GeneralComponents {
             boolean installed = false;
             boolean backupCreated = false;
             try {
-                if (downloaded && staging.isFile() && staging.length() > 0) {
+                if (downloaded && isValidZstdArchive(staging)) {
                     if (destination.exists()) {
                         backupCreated = destination.renameTo(backup);
                         if (!backupCreated) throw new IllegalStateException("Unable to preserve the existing component");
