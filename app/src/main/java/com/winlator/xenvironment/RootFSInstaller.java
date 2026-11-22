@@ -194,7 +194,7 @@ public abstract class RootFSInstaller {
         AppUtils.keepScreenOn(activity);
         PreloaderDialog preloaderDialog = new PreloaderDialog(activity);
         preloaderDialog.show(R.string.loading);
-        Executors.newSingleThreadExecutor().execute(() -> {
+        OPERATIONS.execute(() -> {
             File[] srcFiles, dstFiles;
             File rootDir = RootFS.find(activity).getRootDir();
             File wineSystem32Dir = new File(rootDir, "/opt/wine/lib/wine/x86_64-windows");
