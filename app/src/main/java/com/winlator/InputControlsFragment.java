@@ -151,8 +151,13 @@ public class InputControlsFragment extends Fragment {
         view.findViewById(R.id.BTEditProfile).setOnClickListener((v) -> {
             if (currentProfile != null) {
                 ContentDialog.prompt(context, R.string.profile_name, currentProfile.getName(), (name) -> {
+                    String previousName = currentProfile.getName();
                     currentProfile.setName(name);
-                    currentProfile.save();
+                    if (!currentProfile.save()) {
+                        currentProfile.setName(previousName);
+                        AppUtils.showToast(context, "Unable to save control profile. Check available storage.");
+                        return;
+                    }
                     loadProfileSpinner(sProfile);
                 });
             }
