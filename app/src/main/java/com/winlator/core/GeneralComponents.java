@@ -284,18 +284,53 @@ public abstract class GeneralComponents {
         return filename.replace(type.lowerName()+"-", "").replace(".tzst", "").replace(".sf2", "");
     }
 
+    private static boolean isSafeDownloadFilename(Type type, String filename) {
+        return type != null && filename != null &&
+            filename.matches(java.util.regex.Pattern.quote(type.lowerName())+"-[A-Za-z0-9.+_-]+\\.tzst") &&
+            !filename.contains("..");
+    }
+
     private static void downloadComponentFile(final Type type, final String filename, final Spinner spinner, final String defaultItem) {
         final Activity activity = (Activity)spinner.getContext();
-        File destination = new File(getComponentDir(type, activity), filename);
-        if (destination.isFile()) destination.delete();
-        HttpUtils.download(activity, String.format(INSTALLABLE_COMPONENTS_URL, type.lowerName()+"/"+filename), destination, (success) -> {
-            if (success) {
-                loadSpinner(type, spinner, parseDisplayText(type, filename), defaultItem);
+        if (!isSafeDownloadFilename(type, filename)) {
+            AppUtils.showToast(activity, R.string.a_network_error_occurred);
+            return;
+        }
+
+        File componentDir = getComponentDir(type, activity);
+        File destination = new File(componentDir, filename);
+        File staging = new File(componentDir, filename+".download-"+System.nanoTime());
+        File backup = new File(componentDir, filename+".backup-"+System.nanoTime());
+
+        HttpUtils.download(activity, String.format(INSTALLABLE_COMPONENTS_URL, type.lowerName()+"/"+filename), staging, (downloaded) -> {
+            boolean installed = false;
+            boolean backupCreated = false;
+            try {
+                if (downloaded && staging.isFile() && staging.length() > 0) {
+                    if (destination.exists()) {
+                        backupCreated = destination.renameTo(backup);
+                        if (!backupCreated) throw new IOException("Unable to preserve the existing component");
+                    }
+
+                    installed = staging.renameTo(destination);
+                    if (!installed && backupCreated && backup.exists() && !destination.exists()) {
+                        backupCreated = !backup.renameTo(destination);
+                    }
+                }
             }
-            else {
-                FileUtils.delete(destination);
-                AppUtils.showToast(activity, R.string.a_network_error_occurred);
+            catch (RuntimeException error) {
+                installed = false;
             }
+            finally {
+                FileUtils.delete(staging);
+                if (backupCreated && backup.exists()) {
+                    if (!destination.exists()) backup.renameTo(destination);
+                    else FileUtils.delete(backup);
+                }
+            }
+
+            if (installed) loadSpinner(type, spinner, parseDisplayText(type, filename), defaultItem);
+            else AppUtils.showToast(activity, R.string.a_network_error_occurred);
         });
     }
 
@@ -527,14 +562,26 @@ public abstract class GeneralComponents {
                     AppUtils.showToast(activity, R.string.there_are_no_items_to_download);
                     return;
                 }
-                final String[] filenames = content.split("\n");
+                ArrayList<String> availableFiles = new ArrayList<>();
+                for (String line : content.split("\\r?\\n")) {
+                    String filename = line.trim();
+                    if (isSafeDownloadFilename(type, filename)) availableFiles.add(filename);
+                }
+                if (availableFiles.isEmpty()) {
+                    AppUtils.showToast(activity, R.string.there_are_no_items_to_download);
+                    return;
+                }
+
+                final String[] filenames = availableFiles.toArray(new String[0]);
                 final String[] items = filenames.clone();
                 for (int i = 0; i < items.length; i++) {
                     items[i] = type.title()+" "+parseDisplayText(type, items[i]);
                 }
 
                 ContentDialog.showSelectionList(activity, R.string.install_component, items, false, (positions) -> {
-                    if (!positions.isEmpty()) downloadComponentFile(type, filenames[positions.get(0)], spinner, defaultItem);
+                    if (!positions.isEmpty() && positions.get(0) >= 0 && positions.get(0) < filenames.length) {
+                        downloadComponentFile(type, filenames[positions.get(0)], spinner, defaultItem);
+                    }
                 });
             }
             else AppUtils.showToast(activity, R.string.a_network_error_occurred);
