@@ -95,6 +95,33 @@ jobs:
           ROOTFS_MAGIC="$(od -An -tx1 -N4 "$RUNNER_TEMP/rootfs.tzst" | tr -d ' \\n')"
           test "$ROOTFS_MAGIC" = "28b52ffd"
 
+          # Validate the complete compressed TAR stream on Linux. The Android
+          # unit-test JVM cannot load the APK's Android-only zstd native library.
+          sudo apt-get update
+          sudo apt-get install -y zstd
+          zstd -q -t "$RUNNER_TEMP/rootfs.tzst"
+          zstd -q -d -c "$RUNNER_TEMP/rootfs.tzst" | tar -tf - > "$RUNNER_TEMP/rootfs.list"
+          test -s "$RUNNER_TEMP/rootfs.list"
+          grep -Eq '(^|/)opt/wine/bin/wine(64)?
+          test -s "$RUNNER_TEMP/container_pattern.tzst"
+          PATTERN_MAGIC="$(od -An -tx1 -N4 "$RUNNER_TEMP/container_pattern.tzst" | tr -d ' \\n')"
+          test "$PATTERN_MAGIC" = "28b52ffd"
+
+          unzip -p "$APK" assets/common_dlls.json > "$RUNNER_TEMP/common_dlls.json"
+          test -s "$RUNNER_TEMP/common_dlls.json"
+          python -m json.tool "$RUNNER_TEMP/common_dlls.json" > /dev/null
+
+      - name: Upload WinMali 2.0.0 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: WinMali_2.0.0
+          path: app/build/outputs/apk/debug/WinMali_2.0.0.apk
+          if-no-files-found: error
+          retention-days: 30
+ "$RUNNER_TEMP/rootfs.list"
+          grep -Eq '(^|/)opt/wine/lib/wine/x86_64-windows/' "$RUNNER_TEMP/rootfs.list"
+          grep -Eq '(^|/)opt/wine/lib/wine/i386-windows/' "$RUNNER_TEMP/rootfs.list"
+
           unzip -p "$APK" assets/container_pattern.tzst > "$RUNNER_TEMP/container_pattern.tzst"
           test -s "$RUNNER_TEMP/container_pattern.tzst"
           PATTERN_MAGIC="$(od -An -tx1 -N4 "$RUNNER_TEMP/container_pattern.tzst" | tr -d ' \\n')"
