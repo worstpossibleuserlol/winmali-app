@@ -271,16 +271,24 @@ public abstract class TarCompressorUtils {
                 int entryCount = 0;
                 long totalExtracted = 0;
                 Set<String> seenEntries = new HashSet<>();
+                Set<String> seenDirectories = new HashSet<>();
                 while ((entry = (TarArchiveEntry)tar.getNextEntry()) != null) {
                     if (!tar.canReadEntryData(entry)) return false;
                     if (++entryCount > MAX_ARCHIVE_ENTRIES) return false;
-                    if (entry.isLink() && !entry.isSymbolicLink()) return false;
-                    if (!entry.isDirectory() && !entry.isSymbolicLink() && !entry.isFile()) return false;
+                    boolean hardLink = entry.isLink() && !entry.isSymbolicLink();
+                    if (!entry.isDirectory() && !entry.isSymbolicLink() && !hardLink && !entry.isFile()) return false;
                     if (entry.getSize() > MAX_EXTRACTED_BYTES) return false;
 
                     String normalizedName = normalizeArchiveEntryName(entry.getName(), entry.isDirectory());
                     if (normalizedName == null) return false;
-                    if (!normalizedName.isEmpty() && !seenEntries.add(normalizedName)) return false;
+                    if (!normalizedName.isEmpty()) {
+                        boolean firstOccurrence = seenEntries.add(normalizedName);
+                        // Layered Linux root filesystems can repeat directory headers.
+                        // Repeated files/links remain rejected to avoid ambiguous replacement.
+                        if (!firstOccurrence &&
+                            !(entry.isDirectory() && seenDirectories.contains(normalizedName))) return false;
+                        if (entry.isDirectory()) seenDirectories.add(normalizedName);
+                    }
 
                     File file = resolveArchiveEntry(root, entry.getName());
                     if (file == null) return false;
@@ -308,15 +316,53 @@ public abstract class TarCompressorUtils {
                     }
                     else if (entry.isSymbolicLink()) {
                         String linkName = entry.getLinkName();
-                        if (linkName == null || linkName.isEmpty() || new File(linkName).isAbsolute() ||
-                            linkName.matches("^[A-Za-z]:.*")) return false;
+                        if (linkName == null || linkName.isEmpty() || linkName.matches("^[A-Za-z]:.*")) return false;
 
-                        File linkTarget = new File(file.getParentFile(), linkName);
-                        if (!isWithinDirectory(root, linkTarget)) return false;
+                        String safeLinkName = linkName;
+                        if (linkName.startsWith("/")) {
+                            // An absolute link in a Linux rootfs is rooted inside the guest
+                            // filesystem, not the Android host. Rebase it as a relative link
+                            // so it keeps its chroot meaning without escaping the staging tree.
+                            String targetPath = linkName.substring(1);
+                            String normalizedTarget = targetPath.isEmpty() ? "" :
+                                normalizeArchiveEntryName(targetPath, false);
+                            if (normalizedTarget == null) return false;
+                            File linkTarget = normalizedTarget.isEmpty() ? root : new File(root, normalizedTarget);
+                            if (!isWithinDirectory(root, linkTarget)) return false;
+                            safeLinkName = file.getParentFile().toPath()
+                                .relativize(linkTarget.getAbsoluteFile().toPath()).toString();
+                        }
+                        else {
+                            if (new File(linkName).isAbsolute()) return false;
+                            File linkTarget = new File(file.getParentFile(), linkName);
+                            if (!isWithinDirectory(root, linkTarget)) return false;
+                        }
+
                         if (file.exists() || FileUtils.isSymlink(file)) {
                             if (!FileUtils.delete(file)) return false;
                         }
-                        if (!FileUtils.symlink(linkName, file.getAbsolutePath())) return false;
+                        if (!FileUtils.symlink(safeLinkName, file.getAbsolutePath())) return false;
+                    }
+                    else if (hardLink) {
+                        String linkName = entry.getLinkName();
+                        if (linkName == null || linkName.isEmpty() || linkName.matches("^[A-Za-z]:.*")) return false;
+                        String targetPath = linkName.startsWith("/") ? linkName.substring(1) : linkName;
+                        String normalizedTarget = normalizeArchiveEntryName(targetPath, false);
+                        if (normalizedTarget == null) return false;
+
+                        File linkTarget = new File(root, normalizedTarget);
+                        if (!isWithinDirectory(root, linkTarget) || hasSymlinkParent(root, linkTarget) ||
+                            FileUtils.isSymlink(linkTarget) || !linkTarget.isFile()) return false;
+
+                        File parent = file.getParentFile();
+                        if (parent == null || (!parent.isDirectory() && !parent.mkdirs()) ||
+                            hasSymlinkParent(root, file)) return false;
+                        if (file.exists() || FileUtils.isSymlink(file)) {
+                            if (!FileUtils.delete(file)) return false;
+                        }
+                        // Copying the payload is safer than creating a host hard link and
+                        // preserves the guest file contents and permissions.
+                        Files.copy(linkTarget.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
                     }
                     else {
                         File parent = file.getParentFile();
