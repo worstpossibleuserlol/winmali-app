@@ -36,16 +36,24 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
     @Override
     public void start() {
+        boolean startupFailed = false;
         synchronized (lock) {
             stop();
             if (!extractBox64File()) {
                 AppUtils.showToast(environment.getContext(), R.string.unable_to_install_compatibility_runtime);
-                if (terminationCallback != null) terminationCallback.call(1);
-                return;
+                startupFailed = true;
             }
-            copyDefaultBox64RCFile();
-            pid = execGuestProgram();
+            else {
+                copyDefaultBox64RCFile();
+                pid = execGuestProgram();
+                if (pid <= 0) {
+                    pid = -1;
+                    startupFailed = true;
+                }
+            }
         }
+
+        if (startupFailed && terminationCallback != null) terminationCallback.call(1);
     }
 
     @Override
