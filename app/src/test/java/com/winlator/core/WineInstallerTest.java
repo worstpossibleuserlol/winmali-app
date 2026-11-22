@@ -104,4 +104,21 @@ public class WineInstallerTest {
 
         assertNull(WineInstaller.findWineExecutable(root));
     }
+    @Test
+    public void resolvesManifestDeclaredWineExecutableOutsideLegacyBinDirectory() throws IOException {
+        File root = temporaryFolder.getRoot();
+        File expected = createAarch64Elf(new File(root, "usr/bin/custom-wine"));
+
+        assertEquals(expected, WineInstaller.findWineExecutable(root, "usr/bin/custom-wine"));
+    }
+
+    @Test
+    public void rejectsUnsafeManifestDeclaredWineExecutablePath() throws IOException {
+        File root = temporaryFolder.getRoot();
+        createAarch64Elf(new File(root, "usr/bin/custom-wine"));
+
+        assertNull(WineInstaller.findWineExecutable(root, "../outside-wine"));
+        assertNull(WineInstaller.findWineExecutable(root, "/usr/bin/custom-wine"));
+    }
+
 }
