@@ -50,6 +50,21 @@ public class FileUtilsTest {
     }
 
     @Test
+    public void comparesLargeFilesWithBufferedReads() throws IOException {
+        File first = new File(temporaryFolder.getRoot(), "first.bin");
+        File second = new File(temporaryFolder.getRoot(), "second.bin");
+        byte[] data = new byte[2 * 1024 * 1024];
+        for (int i = 0; i < data.length; i++) data[i] = (byte)(i * 31);
+        Files.write(first.toPath(), data);
+        Files.write(second.toPath(), data.clone());
+
+        assertTrue(FileUtils.contentEquals(first, second));
+        data[data.length-1] ^= 1;
+        Files.write(second.toPath(), data);
+        assertFalse(FileUtils.contentEquals(first, second));
+    }
+
+    @Test
     public void basenameKeepsDotfilesAndStripsOnlyTheLastExtension() {
         assertEquals(".bashrc", FileUtils.getBasename(".bashrc"));
         assertEquals("game", FileUtils.getBasename("game.exe"));

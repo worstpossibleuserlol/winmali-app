@@ -385,13 +385,19 @@ public abstract class FileUtils {
         else if (origin.isFile() && target.isFile()) {
             if (origin.length() != target.length()) return false;
 
-            try (InputStream inStream1 = new BufferedInputStream(new FileInputStream(origin));
-                 InputStream inStream2 = new BufferedInputStream(new FileInputStream(target))) {
-                int data;
-                while ((data = inStream1.read()) != -1) {
-                    if (data != inStream2.read()) return false;
+            try (InputStream inStream1 = new BufferedInputStream(new FileInputStream(origin), StreamUtils.BUFFER_SIZE);
+                 InputStream inStream2 = new BufferedInputStream(new FileInputStream(target), StreamUtils.BUFFER_SIZE)) {
+                byte[] buffer1 = new byte[StreamUtils.BUFFER_SIZE];
+                byte[] buffer2 = new byte[StreamUtils.BUFFER_SIZE];
+                while (true) {
+                    int count1 = inStream1.read(buffer1);
+                    int count2 = inStream2.read(buffer2);
+                    if (count1 != count2) return false;
+                    if (count1 < 0) return true;
+                    for (int i = 0; i < count1; i++) {
+                        if (buffer1[i] != buffer2[i]) return false;
+                    }
                 }
-                return true;
             }
             catch (IOException e) {
                 return false;

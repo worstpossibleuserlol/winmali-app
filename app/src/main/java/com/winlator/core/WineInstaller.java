@@ -163,10 +163,10 @@ public abstract class WineInstaller {
         if (root == null) return null;
         File bin = new File(root, "bin");
         File wine64 = new File(bin, "wine64");
-        if (wine64.isFile() && ElfHelper.is64Bit(wine64)) return wine64;
+        if (CompatibilityRuntimePackage.isAarch64Elf(wine64)) return wine64;
 
         File wine = new File(bin, "wine");
-        return wine.isFile() && ElfHelper.is64Bit(wine) ? wine : null;
+        return CompatibilityRuntimePackage.isAarch64Elf(wine) ? wine : null;
     }
 
     private static boolean hasWineRuntimeBinaries(File root) {
