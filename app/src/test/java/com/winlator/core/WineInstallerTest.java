@@ -114,9 +114,17 @@ public class WineInstallerTest {
         String manifest = "{\"engine\":\"WINE\",\"version\":\"10.10\",\"hostAbi\":\"arm64-v8a\","+
             "\"entrypoint\":\"usr/bin/custom-wine\",\"wineExecutable\":\"usr/bin/custom-wine\","+
             "\"wineLibraryRoot\":\"lib/wine\",\"guestArchitectures\":[\"x86\",\"x86_64\"]}";
-        assertTrue(FileUtils.writeString(new File(root, CompatibilityRuntimeManifest.FILE_NAME), manifest));
+        File manifestFile = new File(root, CompatibilityRuntimeManifest.FILE_NAME);
+        assertTrue(FileUtils.writeString(manifestFile, manifest));
+        assertEquals("manifest file contents should round-trip", manifest, FileUtils.readString(manifestFile));
+        assertTrue("version identifier should be accepted", CompatibilityRuntimePackage.isValidVersionName("10.10"));
+        assertEquals("usr/bin/custom-wine",
+            CompatibilityRuntimePackage.normalizeRelativePath("usr/bin/custom-wine"));
+        CompatibilityRuntimeManifest directlyParsed = CompatibilityRuntimeManifest.parse(
+            new org.json.JSONObject(manifest));
+        assertTrue("manifest JSON should parse", directlyParsed != null);
         CompatibilityRuntimeManifest parsed = CompatibilityRuntimeManifest.read(root);
-        assertTrue("manifest should parse", parsed != null);
+        assertTrue("manifest file should be read and parsed", parsed != null);
         assertTrue("manifest should validate", parsed.validateWineDirectory(root));
         assertTrue("declared Wine executable should be AArch64 ELF",
             CompatibilityRuntimePackage.isAarch64Elf(expected));
