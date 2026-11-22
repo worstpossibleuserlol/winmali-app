@@ -17,12 +17,10 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.SocketException;
 import java.net.InetSocketAddress;
-import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class WinHandler {
@@ -476,7 +474,8 @@ public class WinHandler {
             running = true;
 
             startSendThread();
-            receiveThread = new Thread(() -> receiveLoop(newSocket),
+            final DatagramSocket boundSocket = newSocket;
+            receiveThread = new Thread(() -> receiveLoop(boundSocket),
                 "WinMali-winhandler-receive");
             receiveThread.setDaemon(true);
             receiveThread.start();
