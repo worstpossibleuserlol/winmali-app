@@ -137,6 +137,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     public int frameRatingWindowId = -1;
     private Win32AppWorkarounds win32AppWorkarounds;
     private String screenEffectProfile;
+    private final java.util.concurrent.atomic.AtomicBoolean exitRequested = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -446,6 +447,12 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     }
 
     private void exit() {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            runOnUiThread(this::exit);
+            return;
+        }
+        if (!exitRequested.compareAndSet(false, true)) return;
+
         winHandler.stop();
         if (environment != null) environment.stopEnvironmentComponents();
 
