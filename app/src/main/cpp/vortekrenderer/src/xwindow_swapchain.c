@@ -212,7 +212,13 @@ static VkResult createCopyCommandBuffers(XWindowSwapchain* swapchain, uint32_t g
     swapchain->commandBuffers = calloc(swapchain->imageCount, sizeof(VkCommandBuffer));
     if (swapchain->commandBuffers == NULL) return VK_ERROR_OUT_OF_HOST_MEMORY;
     result = vulkanWrapper.vkAllocateCommandBuffers(swapchain->device, &commandBufferInfo, swapchain->commandBuffers);
-    return result;
+    if (result != VK_SUCCESS) {
+        // No command-buffer handles are valid when allocation fails.
+        MEMFREE(swapchain->commandBuffers);
+        swapchain->commandBuffers = NULL;
+        return result;
+    }
+    return VK_SUCCESS;
 }
 
 static void setIdleImageThread(void* param) {

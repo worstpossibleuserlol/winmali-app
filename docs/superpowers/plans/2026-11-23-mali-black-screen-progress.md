@@ -19,3 +19,5 @@ Final review: self-review (no subagent tool). Reviewed the GPUImage Java/JNI con
 Task 4: fixed Vulkan AHardwareBuffer ownership — each XWindowSwapchain now takes its own reference to the imported AHardwareBuffer and releases it only after destroying the Vulkan image and freeing imported memory. This prevents the Java drawable from freeing a buffer still referenced by the Vulkan swapchain.
 
 Task 5: hardened low-memory swapchain creation — check swapchain/image/command-buffer allocations, handle surface-format allocation failure, prevent cleanup from dereferencing a null image array, and check VkContext allocation before field access.
+
+Task 6: command-buffer allocation failure now frees its host-side handle array and clears the pointer before swapchain teardown, so cleanup cannot pass zero/uninitialized handles to Vulkan.
