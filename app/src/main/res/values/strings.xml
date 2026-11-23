@@ -415,7 +415,7 @@
     <string name="game_compatibility_profile_performance">Performance</string>
     <string name="game_compatibility_profile_experimental_dxvk">Experimental DXVK</string>
     <string name="game_compatibility_profile_detecting">Detecting device graphics capabilities…</string>
-    <string name="game_compatibility_profile_detected">Detected device: %1$s · Vulkan %2$s. Select a starting point; you can still edit every setting manually.</string>
+    <string name="game_compatibility_profile_detected">Detected device: %1$s · %2$s. Select a starting point; you can still edit every setting manually.</string>
     <string name="game_compatibility_profile_description">Profiles apply only to this shortcut. They are starting points, not compatibility guarantees.</string>
     <string name="game_compatibility_profile_warning">Experimental DXVK is not automatically selected for Mali. It may fail to start or render incorrectly on some devices.</string>
     <string name="game_compatibility_profile_custom_selected">Custom settings are active. The profile selector will not change your current values.</string>
