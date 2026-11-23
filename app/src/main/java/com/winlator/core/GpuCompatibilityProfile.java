@@ -154,18 +154,17 @@ public final class GpuCompatibilityProfile {
     }
 
     /**
-     * Applies Mali-safe WineD3D defaults. The container UI writes "gl" and
-     * "fbo" even when the user simply accepts its default values, so those
-     * two values are treated as inherited defaults while automatic GPU
-     * compatibility is enabled. Non-default renderer choices are preserved.
+     * Keeps Mali's automatic WineD3D renderer on the OpenGL path used by the
+     * bundled legacy Direct3D 9 test application. Explicit renderer choices
+     * remain untouched. The inherited FBO default is changed to backbuffer.
      */
     public static KeyValueSet applyMaliWineD3DDefaults(KeyValueSet config, Vendor vendor) {
         KeyValueSet resolved = config != null ? config : new KeyValueSet();
         if (vendor != Vendor.MALI) return resolved;
 
         String renderer = resolved.get("renderer", "").trim();
-        if (renderer.isEmpty() || renderer.equalsIgnoreCase("gl")) {
-            resolved.put("renderer", "vulkan");
+        if (renderer.isEmpty()) {
+            resolved.put("renderer", "gl");
         }
 
         String offscreenMode = resolved.get("OffscreenRenderingMode", "").trim();

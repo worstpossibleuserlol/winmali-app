@@ -53,6 +53,7 @@ import com.winlator.core.GPUHelper;
 import com.winlator.core.GpuCompatibilityProfile;
 import com.winlator.core.GraphicsDriverInstallState;
 import com.winlator.core.DXWrapperInstallState;
+import com.winlator.core.WinComponentInstallState;
 import com.winlator.core.KeyValueSet;
 import com.winlator.core.LocaleHelper;
 import com.winlator.core.PreloaderDialog;
@@ -549,8 +550,9 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         if (!extractDXWrapperFiles()) return false;
         if (!previousDXWrapper.equals(container.getExtra("dxwrapper"))) containerDataChanged = true;
 
-        if (!wincomponents.equals(container.getExtra("wincomponents"))) {
-            extractWinComponentFiles();
+        String previousWinComponents = container.getExtra("wincomponents");
+        if (!extractWinComponentFiles()) return false;
+        if (!wincomponents.equals(previousWinComponents)) {
             container.putExtra("wincomponents", wincomponents);
             containerDataChanged = true;
         }
@@ -1205,23 +1207,40 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         return true;
     }
 
-    private void extractWinComponentFiles() {
+    private boolean extractWinComponentFiles() {
         File rootDir = rootFS.getRootDir();
         File windowsDir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows");
         File systemRegFile = new File(rootDir, RootFS.WINEPREFIX+"/system.reg");
 
         try {
             JSONObject wincomponentsJSONObject = new JSONObject(FileUtils.readString(this, "wincomponents/wincomponents.json"));
+            JSONArray direct3DNames = wincomponentsJSONObject.getJSONObject("direct3d").getJSONArray("dlnames");
+            String[] direct3DDllNames = new String[direct3DNames.length()];
+            for (int i = 0; i < direct3DNames.length(); i++) {
+                direct3DDllNames[i] = direct3DNames.getString(i);
+            }
+            boolean direct3DFilesMissing = !WinComponentInstallState.arePresent(windowsDir, direct3DDllNames);
+
             Iterator<String[]> oldWinComponentsIter = new KeyValueSet(container.getExtra("wincomponents", Container.FALLBACK_WINCOMPONENTS)).iterator();
             ArrayList<String> builtinDlls = new ArrayList<>();
+            ArrayList<String> direct3DBuiltinDlls = new ArrayList<>();
 
             for (String[] wincomponent : new KeyValueSet(wincomponents)) {
-                if (wincomponent[1].equals(oldWinComponentsIter.next()[1])) continue;
                 String identifier = wincomponent[0];
+                String oldValue = oldWinComponentsIter.next()[1];
                 boolean useNative = wincomponent[1].equals("1");
+                boolean componentChanged = !wincomponent[1].equals(oldValue);
+                boolean repairDirect3D = identifier.equals("direct3d") && direct3DFilesMissing;
+                if (!componentChanged && !repairDirect3D) continue;
 
                 if (useNative) {
-                    TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "wincomponents/"+identifier+".tzst", windowsDir);
+                    boolean extracted = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD,
+                        this, "wincomponents/"+identifier+".tzst", windowsDir);
+                    if (identifier.equals("direct3d") &&
+                        (!extracted || !WinComponentInstallState.arePresent(windowsDir, direct3DDllNames))) {
+                        android.util.Log.e("WinMali-D3D", "Unable to install all native Direct3D component DLLs");
+                        return false;
+                    }
                 }
                 else {
                     JSONObject wincomponentJSONObject = wincomponentsJSONObject.getJSONObject(identifier);
@@ -1229,15 +1248,18 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                         JSONArray dlnames = wincomponentJSONObject.getJSONArray("dlnames");
                         for (int i = 0; i < dlnames.length(); i++) {
                             String dlname = dlnames.getString(i);
-                            builtinDlls.add(!dlname.endsWith(".exe") ? dlname+".dll" : dlname);
+                            String dllName = !dlname.endsWith(".exe") ? dlname+".dll" : dlname;
+                            if (identifier.equals("direct3d")) direct3DBuiltinDlls.add(dllName);
+                            else builtinDlls.add(dllName);
                         }
                     }
                     else {
-                        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "wincomponents/"+identifier+".tzst", windowsDir, (destination, size) -> {
-                            String name = destination.getName();
-                            if (name.endsWith(".dll") || name.endsWith(".manifest") || name.endsWith("_deadbeef")) FileUtils.delete(destination);
-                            return null;
-                        });
+                        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
+                            "wincomponents/"+identifier+".tzst", windowsDir, (destination, size) -> {
+                                String name = destination.getName();
+                                if (name.endsWith(".dll") || name.endsWith(".manifest") || name.endsWith("_deadbeef")) FileUtils.delete(destination);
+                                return null;
+                            });
                     }
                 }
 
@@ -1245,9 +1267,23 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             }
 
             if (!builtinDlls.isEmpty()) restoreBuiltinDllFiles(builtinDlls.toArray(new String[0]));
+            if (!direct3DBuiltinDlls.isEmpty() &&
+                !restoreBuiltinDllFiles(direct3DBuiltinDlls.toArray(new String[0]))) {
+                android.util.Log.e("WinMali-D3D", "Unable to restore built-in Direct3D component DLLs");
+                return false;
+            }
+            if (!WinComponentInstallState.arePresent(windowsDir, direct3DDllNames)) {
+                android.util.Log.e("WinMali-D3D", "Direct3D component is incomplete; required DLLs are missing");
+                return false;
+            }
+
             WineUtils.overrideWinComponentDlls(this, container, wincomponents);
+            return true;
         }
-        catch (JSONException e) {}
+        catch (JSONException | RuntimeException error) {
+            android.util.Log.e("WinMali-D3D", "Unable to validate or install Direct3D components", error);
+            return false;
+        }
     }
 
     private boolean restoreBuiltinDllFiles(final String... dlls) {

@@ -56,15 +56,15 @@ public class GpuCompatibilityProfileTest {
     }
 
     @Test
-    public void maliWineD3DUsesVulkanAndBackbufferWhenNoChoiceIsSaved() {
+    public void maliWineD3DUsesOpenGLAndBackbufferWhenNoChoiceIsSaved() {
         KeyValueSet config = GpuCompatibilityProfile.applyMaliWineD3DDefaults(
             new KeyValueSet(), GpuCompatibilityProfile.Vendor.MALI);
-        assertEquals("vulkan", config.get("renderer"));
+        assertEquals("gl", config.get("renderer"));
         assertEquals("backbuffer", config.get("OffscreenRenderingMode"));
     }
 
     @Test
-    public void maliWineD3DOverridesStoredLegacyUiDefaultsToVulkanAndBackbuffer() {
+    public void maliWineD3DKeepsStoredOpenGLAndFixesLegacyFboDefault() {
         // The WineD3D configuration UI persists these defaults when a user
         // opens and confirms the dialog, even without choosing them.
         KeyValueSet config = new KeyValueSet();
@@ -72,7 +72,7 @@ public class GpuCompatibilityProfileTest {
         config.put("OffscreenRenderingMode", "fbo");
         GpuCompatibilityProfile.applyMaliWineD3DDefaults(config,
             GpuCompatibilityProfile.Vendor.MALI);
-        assertEquals("vulkan", config.get("renderer"));
+        assertEquals("gl", config.get("renderer"));
         assertEquals("backbuffer", config.get("OffscreenRenderingMode"));
     }
 
@@ -85,6 +85,16 @@ public class GpuCompatibilityProfileTest {
             GpuCompatibilityProfile.Vendor.MALI);
         assertEquals("gdi", config.get("renderer"));
         assertEquals("backbuffer", config.get("OffscreenRenderingMode"));
+    }
+
+    @Test
+    public void maliWineD3DPreservesAnExplicitVulkanRendererChoice() {
+        KeyValueSet config = new KeyValueSet();
+        config.put("renderer", "vulkan");
+        config.put("OffscreenRenderingMode", "backbuffer");
+        GpuCompatibilityProfile.applyMaliWineD3DDefaults(config,
+            GpuCompatibilityProfile.Vendor.MALI);
+        assertEquals("vulkan", config.get("renderer"));
     }
 
     @Test

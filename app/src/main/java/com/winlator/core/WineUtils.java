@@ -126,8 +126,9 @@ public abstract class WineUtils {
             JSONObject wincomponentsJSONObject = new JSONObject(FileUtils.readString(context, "wincomponents/wincomponents.json"));
 
             for (String[] wincomponent : new KeyValueSet(wincomponents)) {
-                if (wincomponent[1].equals(oldWinComponentsIter.next()[1])) continue;
                 String identifier = wincomponent[0];
+                String oldValue = oldWinComponentsIter.next()[1];
+                if (wincomponent[1].equals(oldValue) && !identifier.equals("direct3d")) continue;
                 boolean useNative = wincomponent[1].equals("1");
 
                 JSONObject wincomponentJSONObject = wincomponentsJSONObject.getJSONObject(identifier);
