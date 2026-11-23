@@ -153,6 +153,25 @@ public final class GpuCompatibilityProfile {
         return driver;
     }
 
+    /**
+     * Applies the Mali-safe WineD3D path only when the user has not stored an
+     * explicit renderer/offscreen choice. Vortek provides the Vulkan path on
+     * Mali devices, while Backbuffer avoids the FBO path that can show black
+     * output on some mobile GPU/driver combinations.
+     */
+    public static KeyValueSet applyMaliWineD3DDefaults(KeyValueSet config, Vendor vendor) {
+        KeyValueSet resolved = config != null ? config : new KeyValueSet();
+        if (vendor != Vendor.MALI) return resolved;
+
+        if (resolved.get("renderer", "").trim().isEmpty()) {
+            resolved.put("renderer", "vulkan");
+        }
+        if (resolved.get("OffscreenRenderingMode", "").trim().isEmpty()) {
+            resolved.put("OffscreenRenderingMode", "backbuffer");
+        }
+        return resolved;
+    }
+
     public String getVendorLabel() {
         switch (vendor) {
             case MALI: return "Mali";

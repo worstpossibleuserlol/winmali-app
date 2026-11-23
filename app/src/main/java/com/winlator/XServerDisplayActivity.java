@@ -505,6 +505,12 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             dxwrapper = safeDXWrapper;
             dxwrapperConfig = new KeyValueSet[]{new KeyValueSet(), new KeyValueSet()};
         }
+        if (dxwrapper.equals(DXWrappers.WINED3D)) {
+            dxwrapperConfig[0] = GpuCompatibilityProfile.applyMaliWineD3DDefaults(
+                dxwrapperConfig[0], vendor);
+            android.util.Log.i("WinMali-GPU",
+                "Using Mali WineD3D Vulkan renderer with Backbuffer offscreen rendering");
+        }
 
         String safeVulkanDriver = GpuCompatibilityProfile.resolveVulkanDriverForLaunch(
             graphicsDriver[0], vendor, true);

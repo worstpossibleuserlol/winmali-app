@@ -3,6 +3,9 @@ package com.winlator;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.res.ColorStateList;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.media.midi.MidiDeviceInfo;
@@ -477,14 +480,19 @@ public class SettingsFragment extends Fragment {
     }
 
     private void showRuntimeCenter(Context context) {
+        final int dialogBackgroundColor = Color.rgb(26, 30, 33); // #1A1E21
+        final int cardBackgroundColor = Color.rgb(36, 42, 46);
+        final int buttonBackgroundColor = Color.rgb(55, 64, 70);
         final RuntimeCenterManager runtimeManager = new RuntimeCenterManager(context);
         final LinearLayout runtimeList = new LinearLayout(context);
         runtimeList.setOrientation(LinearLayout.VERTICAL);
+        runtimeList.setBackgroundColor(dialogBackgroundColor);
         int padding = (int)(16 * context.getResources().getDisplayMetrics().density);
         runtimeList.setPadding(padding, 0, padding, padding);
 
         ScrollView scrollView = new ScrollView(context);
         scrollView.setFillViewport(false);
+        scrollView.setBackgroundColor(dialogBackgroundColor);
         scrollView.addView(runtimeList);
 
         final AlertDialog dialog = new AlertDialog.Builder(context)
@@ -499,12 +507,14 @@ public class SettingsFragment extends Fragment {
             TextView introduction = new TextView(context);
             introduction.setText(R.string.runtime_center_description);
             introduction.setTextSize(13);
+            introduction.setTextColor(Color.WHITE);
             introduction.setPadding(0, 0, 0, padding);
             runtimeList.addView(introduction);
 
             for (RuntimeCenterCatalog.Runtime runtime : RuntimeCenterCatalog.getRuntimes()) {
                 LinearLayout card = new LinearLayout(context);
                 card.setOrientation(LinearLayout.VERTICAL);
+                card.setBackgroundColor(cardBackgroundColor);
                 int cardPadding = (int)(12 * context.getResources().getDisplayMetrics().density);
                 card.setPadding(cardPadding, cardPadding, cardPadding, cardPadding);
                 LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
@@ -515,6 +525,7 @@ public class SettingsFragment extends Fragment {
                 TextView title = new TextView(context);
                 title.setText(runtime.displayName);
                 title.setTextSize(16);
+                title.setTextColor(Color.WHITE);
                 title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
                 card.addView(title);
 
@@ -522,6 +533,7 @@ public class SettingsFragment extends Fragment {
                 details.setText(runtime.family.label+" · "+runtime.getArchitectureLabel()+" · "+
                     StringUtils.formatBytes(runtime.fileSizeBytes));
                 details.setTextSize(12);
+                details.setTextColor(Color.WHITE);
                 details.setPadding(0, 4, 0, 4);
                 card.addView(details);
 
@@ -535,15 +547,18 @@ public class SettingsFragment extends Fragment {
                 else if (downloaded) status.setText(R.string.runtime_center_unsupported);
                 else status.setText(R.string.runtime_center_not_downloaded);
                 status.setTextSize(12);
+                status.setTextColor(Color.WHITE);
                 card.addView(status);
 
                 TextView warning = new TextView(context);
                 warning.setText(runtime.warning);
                 warning.setTextSize(12);
+                warning.setTextColor(Color.WHITE);
                 warning.setPadding(0, 4, 0, 6);
                 card.addView(warning);
 
                 Button action = new Button(context);
+                styleRuntimeCenterButton(action, buttonBackgroundColor);
                 if (installed) {
                     action.setText(selected ? R.string.runtime_center_default : R.string.runtime_center_set_default);
                     action.setEnabled(!selected);
@@ -554,6 +569,7 @@ public class SettingsFragment extends Fragment {
                     card.addView(action);
 
                     Button remove = new Button(context);
+                    styleRuntimeCenterButton(remove, buttonBackgroundColor);
                     remove.setText(R.string.runtime_center_remove_runtime);
                     remove.setOnClickListener(v -> ContentDialog.confirm(context,
                         R.string.do_you_want_to_remove_this_wine_version, () ->
@@ -583,6 +599,7 @@ public class SettingsFragment extends Fragment {
                     card.addView(action);
 
                     Button remove = new Button(context);
+                    styleRuntimeCenterButton(remove, buttonBackgroundColor);
                     remove.setText(R.string.runtime_center_remove_download);
                     remove.setOnClickListener(v -> {
                         runtimeManager.deleteDownload(runtime);
@@ -596,6 +613,7 @@ public class SettingsFragment extends Fragment {
                     card.addView(action);
 
                     Button remove = new Button(context);
+                    styleRuntimeCenterButton(remove, buttonBackgroundColor);
                     remove.setText(R.string.runtime_center_remove_download);
                     remove.setOnClickListener(v -> {
                         runtimeManager.deleteDownload(runtime);
@@ -621,6 +639,7 @@ public class SettingsFragment extends Fragment {
                 }
 
                 Button source = new Button(context);
+                styleRuntimeCenterButton(source, buttonBackgroundColor);
                 source.setText(R.string.runtime_center_release_notes);
                 source.setOnClickListener(v -> {
                     try {
@@ -636,6 +655,18 @@ public class SettingsFragment extends Fragment {
 
         refreshRef[0].run();
         dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(dialogBackgroundColor));
+        }
+        TextView dialogTitle = dialog.findViewById(android.R.id.alertTitle);
+        if (dialogTitle != null) dialogTitle.setTextColor(Color.WHITE);
+        Button okButton = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+        if (okButton != null) styleRuntimeCenterButton(okButton, buttonBackgroundColor);
+    }
+
+    private static void styleRuntimeCenterButton(Button button, int backgroundColor) {
+        button.setTextColor(Color.WHITE);
+        button.setBackgroundTintList(ColorStateList.valueOf(backgroundColor));
     }
 
     private void showGPUDiagnostics(Context context) {

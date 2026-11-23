@@ -56,6 +56,34 @@ public class GpuCompatibilityProfileTest {
     }
 
     @Test
+    public void maliWineD3DUsesVulkanAndBackbufferWhenNoChoiceIsSaved() {
+        KeyValueSet config = GpuCompatibilityProfile.applyMaliWineD3DDefaults(
+            new KeyValueSet(), GpuCompatibilityProfile.Vendor.MALI);
+        assertEquals("vulkan", config.get("renderer"));
+        assertEquals("backbuffer", config.get("OffscreenRenderingMode"));
+    }
+
+    @Test
+    public void maliWineD3DDefaultsPreserveExplicitRendererAndOffscreenMode() {
+        KeyValueSet config = new KeyValueSet();
+        config.put("renderer", "gl");
+        config.put("OffscreenRenderingMode", "fbo");
+        GpuCompatibilityProfile.applyMaliWineD3DDefaults(config,
+            GpuCompatibilityProfile.Vendor.MALI);
+        assertEquals("gl", config.get("renderer"));
+        assertEquals("fbo", config.get("OffscreenRenderingMode"));
+    }
+
+    @Test
+    public void nonMaliWineD3DDefaultsAreNotModified() {
+        KeyValueSet config = new KeyValueSet();
+        GpuCompatibilityProfile.applyMaliWineD3DDefaults(config,
+            GpuCompatibilityProfile.Vendor.ADRENO);
+        assertEquals("", config.get("renderer", ""));
+        assertEquals("", config.get("OffscreenRenderingMode", ""));
+    }
+
+    @Test
     public void dxvkRequiresVulkan11AndSwapchain() {
         GpuCompatibilityProfile withoutSwapchain = GpuCompatibilityProfile.resolve(
             "Mali-G710", "ARM", vk(1, 3, 0), new String[0]);
