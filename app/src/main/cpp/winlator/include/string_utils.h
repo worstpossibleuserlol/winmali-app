@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #ifndef WINLATOR_STRING_UTILS_H
 #define WINLATOR_STRING_UTILS_H
 

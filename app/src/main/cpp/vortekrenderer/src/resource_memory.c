@@ -8,6 +8,7 @@ extern DeviceMemoryInfo deviceMemoryInfo;
 
 static ResourceMemory* internalAllocate() {
     ResourceMemory* resourceMemory = calloc(1, sizeof(ResourceMemory));
+    if (resourceMemory == NULL) return NULL;
     resourceMemory->buffer = VK_NULL_HANDLE;
     resourceMemory->memory = VK_NULL_HANDLE;
     resourceMemory->fd = -1;
@@ -23,8 +24,13 @@ static AHardwareBuffer* allocateHardwareBuffer(int size) {
     buffDesc.format = AHARDWAREBUFFER_FORMAT_BLOB;
 
     AHardwareBuffer* hardwareBuffer = NULL;
-    AHardwareBuffer_allocate(&buffDesc, &hardwareBuffer);
-
+    int result = AHardwareBuffer_allocate(&buffDesc, &hardwareBuffer);
+    if (result != 0 || hardwareBuffer == NULL) {
+        __android_log_print(ANDROID_LOG_ERROR, "WinMali-Vortek",
+            "AHardwareBuffer_allocate for resource memory failed: %d (size=%d)",
+            result, size);
+        return NULL;
+    }
     return hardwareBuffer;
 }
 
@@ -35,11 +41,15 @@ ResourceMemory* ResourceMemory_allocate(VkContext* context, VkDevice device, VkM
 
     VkResult result;
     ResourceMemory* resourceMemory = internalAllocate();
+    if (resourceMemory == NULL) return NULL;
     if (isHostVisibleMemory(memoryInfo->memoryTypeIndex)) {
         bool hasExternalMemoryFd = context->hasExternalMemoryFd;
         bool hasExternalMemoryDMABuf = context->hasExternalMemoryDMABuf;
 
         switch (context->resourceMemoryType) {
+            case RESOURCE_MEMORY_TYPE_AUTO:
+                // Keep the extension capabilities discovered from the device.
+                break;
             case RESOURCE_MEMORY_TYPE_OPAQUE_FD:
                 hasExternalMemoryFd = true;
                 hasExternalMemoryDMABuf = false;
@@ -102,7 +112,7 @@ ResourceMemory* ResourceMemory_allocate(VkContext* context, VkDevice device, VkM
 
             int fd = -1;
             result = vulkanWrapper.vkGetMemoryFd(device, &getFdInfo, &fd);
-            if (result != VK_SUCCESS || fd <= 0) goto error;
+            if (result != VK_SUCCESS || fd < 0) goto error;
             resourceMemory->fd = fd;
         }
         else {
@@ -113,21 +123,27 @@ ResourceMemory* ResourceMemory_allocate(VkContext* context, VkDevice device, VkM
             bool useExternalMemoryAHB = !hasExternalMemoryDMABuf;
             if (hasExternalMemoryDMABuf) {
                 int fd = dmabuf_alloc(memoryInfo->allocationSize);
-                if (fd > 0) {
+                if (fd >= 0) {
                     int dupFd = dup(fd);
-                    VkImportMemoryFdInfoKHR memoryImportInfo = {0};
-                    memoryImportInfo.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
-                    memoryImportInfo.fd = dupFd;
-                    memoryImportInfo.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+                    if (dupFd >= 0) {
+                        VkImportMemoryFdInfoKHR memoryImportInfo = {0};
+                        memoryImportInfo.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
+                        memoryImportInfo.fd = dupFd;
+                        memoryImportInfo.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
 
-                    memoryInfo->pNext = &memoryImportInfo;
-                    result = vulkanWrapper.vkAllocateMemory(device, memoryInfo, NULL, &resourceMemory->memory);
-                    if (result == VK_SUCCESS) {
-                        resourceMemory->fd = fd;
+                        memoryInfo->pNext = &memoryImportInfo;
+                        result = vulkanWrapper.vkAllocateMemory(device, memoryInfo, NULL, &resourceMemory->memory);
+                        if (result == VK_SUCCESS) {
+                            resourceMemory->fd = fd;
+                        }
+                        else {
+                            CLOSEFD(fd);
+                            CLOSEFD(dupFd);
+                            useExternalMemoryAHB = true;
+                        }
                     }
                     else {
                         CLOSEFD(fd);
-                        CLOSEFD(dupFd);
                         useExternalMemoryAHB = true;
                     }
                 }
@@ -139,8 +155,13 @@ ResourceMemory* ResourceMemory_allocate(VkContext* context, VkDevice device, VkM
                 if (!hardwareBuffer) goto error;
                 resourceMemory->hardwareBuffer = hardwareBuffer;
 
-                int fd = AHardwareBuffer_getFd(hardwareBuffer);
-                if (fd <= 0) goto error;
+                int borrowedFd = AHardwareBuffer_getFd(hardwareBuffer);
+                if (borrowedFd < 0) goto error;
+                int fd = dup(borrowedFd);
+                if (fd < 0) goto error;
+                // ResourceMemory_free owns this duplicate. The native handle
+                // retains ownership of borrowedFd until the AHardwareBuffer is released.
+                resourceMemory->fd = fd;
 
                 VkImportAndroidHardwareBufferInfoANDROID memoryImportInfo = {0};
                 memoryImportInfo.sType = VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID;
@@ -149,7 +170,6 @@ ResourceMemory* ResourceMemory_allocate(VkContext* context, VkDevice device, VkM
                 memoryInfo->pNext = &memoryImportInfo;
                 result = vulkanWrapper.vkAllocateMemory(device, memoryInfo, NULL, &resourceMemory->memory);
                 if (result != VK_SUCCESS) goto error;
-                resourceMemory->fd = fd;
             }
         }
     }

@@ -21,3 +21,5 @@ Task 4: fixed Vulkan AHardwareBuffer ownership — each XWindowSwapchain now tak
 Task 5: hardened low-memory swapchain creation — check swapchain/image/command-buffer allocations, handle surface-format allocation failure, prevent cleanup from dereferencing a null image array, and check VkContext allocation before field access.
 
 Task 6: command-buffer allocation failure now frees its host-side handle array and clears the pointer before swapchain teardown, so cleanup cannot pass zero/uninitialized handles to Vulkan.
+
+Task 7: hardened Vortek resource-memory allocation against calloc/AHardwareBuffer allocation failure, added the explicit AUTO enum case, accepted valid descriptor 0, and duplicated the borrowed AHardwareBuffer native-handle FD before storing/closing it. Fixed the missing stdlib declaration include for strtod in the native utility header.
