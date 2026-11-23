@@ -418,6 +418,7 @@
     <string name="game_compatibility_profile_detected">Detected device: %1$s · %2$s. Select a starting point; you can still edit every setting manually.</string>
     <string name="game_compatibility_profile_description">Profiles apply only to this shortcut. They are starting points, not compatibility guarantees.</string>
     <string name="game_compatibility_profile_warning">Experimental DXVK is not automatically selected for Mali. It may fail to start or render incorrectly on some devices.</string>
+    <string name="game_compatibility_profile_performance_warning">The Performance profile uses more aggressive Box64 optimizations and may be less stable on some applications.</string>
     <string name="game_compatibility_profile_custom_selected">Custom settings are active. The profile selector will not change your current values.</string>
     <string name="unable_to_save_shortcut_settings">Unable to save shortcut settings. Check available storage and try again.</string>
 </resources>
