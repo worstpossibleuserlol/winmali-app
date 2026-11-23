@@ -1,3 +1,5 @@
+#include <android/log.h>
+
 #include "xwindow_swapchain.h"
 #include "vulkan_helper.h"
 #include "time_utils.h"
@@ -37,9 +39,19 @@ static AHardwareBuffer* getWindowHardwareBuffer(JMethods* jmethods, int windowId
 static VkResult createWindowImage(XWindowSwapchain* swapchain, VkFormat imageFormat, VkImageUsageFlags imageUsage) {
     jboolean useHALPixelFormatBGRA8888 = imageFormat == VK_FORMAT_B8G8R8A8_UNORM || imageFormat == VK_FORMAT_B8G8R8A8_SRGB;
     AHardwareBuffer* hardwareBuffer = getWindowHardwareBuffer(swapchain->jmethods, swapchain->windowId, useHALPixelFormatBGRA8888);
+    if (hardwareBuffer == NULL) {
+        __android_log_print(ANDROID_LOG_ERROR, "WinMali-Vortek",
+            "No Android hardware buffer is available for window %d", swapchain->windowId);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
 
     AHardwareBuffer_Desc ahbDesc = {0};
     AHardwareBuffer_describe(hardwareBuffer, &ahbDesc);
+    if (ahbDesc.width == 0 || ahbDesc.height == 0) {
+        __android_log_print(ANDROID_LOG_ERROR, "WinMali-Vortek",
+            "Window %d returned an empty Android hardware buffer", swapchain->windowId);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     swapchain->imageSize[0] = ahbDesc.width;
     swapchain->imageSize[1] = ahbDesc.height;
 
@@ -78,7 +90,20 @@ static VkResult createWindowImage(XWindowSwapchain* swapchain, VkFormat imageFor
 
     VkAndroidHardwareBufferPropertiesANDROID ahbProperties = {0};
     ahbProperties.sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID;
-    vulkanWrapper.vkGetAndroidHardwareBufferPropertiesANDROID(swapchain->device, hardwareBuffer, &ahbProperties);
+    result = vulkanWrapper.vkGetAndroidHardwareBufferPropertiesANDROID(
+        swapchain->device, hardwareBuffer, &ahbProperties);
+    if (result != VK_SUCCESS) {
+        __android_log_print(ANDROID_LOG_ERROR, "WinMali-Vortek",
+            "vkGetAndroidHardwareBufferPropertiesANDROID failed for window %d: %d",
+            swapchain->windowId, result);
+        return result;
+    }
+    if (ahbProperties.allocationSize == 0 || ahbProperties.memoryTypeBits == 0) {
+        __android_log_print(ANDROID_LOG_ERROR, "WinMali-Vortek",
+            "Vulkan reported invalid imported-buffer memory requirements for window %d",
+            swapchain->windowId);
+        return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    }
 
     VkImportAndroidHardwareBufferInfoANDROID memoryImportInfo = {0};
     memoryImportInfo.sType = VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID;

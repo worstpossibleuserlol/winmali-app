@@ -29,18 +29,32 @@ public class GPUImage extends Texture {
 
     public GPUImage(Drawable owner, boolean cpuAccess, boolean useHALPixelFormatBGRA8888) {
         super(owner);
-        hardwareBufferPtr = createHardwareBuffer(owner.width, owner.height, cpuAccess, useHALPixelFormatBGRA8888);
-        if (cpuAccess && hardwareBufferPtr != 0) {
+        hardwareBufferPtr = createHardwareBuffer(owner.width, owner.height,
+            GPUImageBufferUsage.forCpuAccess(cpuAccess), useHALPixelFormatBGRA8888);
+        if (hardwareBufferPtr == 0) {
+            android.util.Log.e("WinMali-GPUImage", "Unable to allocate the shared Android hardware buffer");
+            return;
+        }
+        if (cpuAccess) {
             virtualData = lockHardwareBuffer(hardwareBufferPtr);
-            locked = true;
+            if (virtualData != null) locked = true;
+            else {
+                android.util.Log.e("WinMali-GPUImage", "Unable to lock the CPU-accessible hardware buffer");
+                destroyHardwareBuffer(hardwareBufferPtr, false);
+                hardwareBufferPtr = 0;
+            }
         }
     }
 
     @Override
     public void allocateTexture(short width, short height, ByteBuffer data) {
-        if (isAllocated()) return;
+        if (isAllocated() || hardwareBufferPtr == 0) return;
         super.allocateTexture(width, height, null);
         imageKHRPtr = createImageKHR(hardwareBufferPtr, textureId);
+        if (imageKHRPtr == 0) {
+            super.destroy();
+            android.util.Log.e("WinMali-GPUImage", "EGLImage import failed; the shared window texture was not created");
+        }
     }
 
     @Override
@@ -73,7 +87,7 @@ public class GPUImage extends Texture {
 
     @Override
     public void destroy() {
-        destroyImageKHR(imageKHRPtr);
+        if (imageKHRPtr != 0) destroyImageKHR(imageKHRPtr, hardwareBufferPtr);
         destroyHardwareBuffer(hardwareBufferPtr, locked);
         virtualData = null;
         imageKHRPtr = 0;
@@ -88,15 +102,20 @@ public class GPUImage extends Texture {
     public static GPUImage createOrObtain(XServer xServer, Drawable drawable, boolean cpuAccess, boolean useHALPixelFormatBGRA8888) {
         final Texture texture = drawable.getTexture();
         if (!(texture instanceof GPUImage)) {
-            xServer.getRenderer().xServerView.queueEvent(texture::destroy);
             GPUImage gpuImage = new GPUImage(drawable, cpuAccess, useHALPixelFormatBGRA8888);
+            if (gpuImage.getHardwareBufferPtr() == 0) {
+                gpuImage.destroy();
+                android.util.Log.e("WinMali-GPUImage", "Keeping the existing drawable texture because shared-buffer allocation failed");
+                return null;
+            }
+            xServer.getRenderer().xServerView.queueEvent(texture::destroy);
             drawable.setTexture(gpuImage);
             return gpuImage;
         }
         else return (GPUImage)texture;
     }
 
-    private native long createHardwareBuffer(short width, short height, boolean cpuAccess, boolean useHALPixelFormatBGRA8888);
+    private native long createHardwareBuffer(short width, short height, long usage, boolean useHALPixelFormatBGRA8888);
 
     private native void destroyHardwareBuffer(long hardwareBufferPtr, boolean locked);
 
@@ -104,5 +123,5 @@ public class GPUImage extends Texture {
 
     private native long createImageKHR(long hardwareBufferPtr, int textureId);
 
-    private native void destroyImageKHR(long imageKHRPtr);
+    private native void destroyImageKHR(long imageKHRPtr, long hardwareBufferPtr);
 }

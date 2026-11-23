@@ -17,6 +17,6 @@ public final class GPUImageBufferUsage {
      * reflects the old allocation policy and is corrected in the follow-up fix.
      */
     static long forCpuAccess(boolean cpuAccess) {
-        return cpuAccess ? CPU_WRITE_OFTEN : GPU_COLOR_OUTPUT;
+        return GPU_SAMPLED_IMAGE | (cpuAccess ? CPU_WRITE_OFTEN : GPU_COLOR_OUTPUT);
     }
 }
