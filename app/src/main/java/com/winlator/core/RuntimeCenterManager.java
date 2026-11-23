@@ -48,23 +48,35 @@ public final class RuntimeCenterManager {
         return archive == null ? null : new File(archive.getParentFile(), archive.getName()+MARKER_SUFFIX);
     }
 
+    /**
+     * Fast UI-state check. A verified marker is bound to the exact catalog digest,
+     * expected length, and file modification time. Full digest verification is always
+     * repeated asynchronously immediately before installation.
+     */
     public boolean isDownloaded(RuntimeCenterCatalog.Runtime runtime) {
+        if (runtime == null) return false;
         File archive = getDownloadFile(runtime);
-        if (archive == null || !archive.isFile() || archive.length() != runtime.fileSizeBytes) return false;
         File marker = getVerificationMarker(runtime);
-        String expectedMarker = runtime.sha256+"\n"+runtime.fileSizeBytes+"\n"+archive.lastModified();
-        if (marker != null && marker.isFile() && expectedMarker.equals(FileUtils.readString(marker))) return true;
-        if (!RuntimePackageVerifier.verify(archive, runtime.fileSizeBytes, runtime.sha256)) return false;
-        return marker != null && FileUtils.writeString(marker, expectedMarker);
+        if (archive == null || marker == null || !archive.isFile() ||
+                archive.length() != runtime.fileSizeBytes || !marker.isFile()) return false;
+        String expectedMarker = runtime.sha256+"\\n"+runtime.fileSizeBytes+"\\n"+archive.lastModified();
+        return expectedMarker.equals(FileUtils.readString(marker));
     }
 
-    public boolean isVerifiedDownload(RuntimeCenterCatalog.Runtime runtime) {
+    private void verifyDownloadAsync(RuntimeCenterCatalog.Runtime runtime,
+            Callback<Boolean> callback) {
         File archive = getDownloadFile(runtime);
-        if (archive == null || !RuntimePackageVerifier.verify(archive,
-                runtime.fileSizeBytes, runtime.sha256)) return false;
-        File marker = getVerificationMarker(runtime);
-        String value = runtime.sha256+"\n"+runtime.fileSizeBytes+"\n"+archive.lastModified();
-        return marker != null && FileUtils.writeString(marker, value);
+        if (runtime == null || archive == null) {
+            if (callback != null) callback.call(false);
+            return;
+        }
+        RuntimePackageVerifier.verifyAsync(archive, runtime.fileSizeBytes, runtime.sha256, verified -> {
+            File marker = getVerificationMarker(runtime);
+            boolean marked = verified && marker != null && FileUtils.writeString(marker,
+                runtime.sha256+"\\n"+runtime.fileSizeBytes+"\\n"+archive.lastModified());
+            if (!marked && marker != null) FileUtils.delete(marker);
+            if (callback != null) callback.call(marked);
+        });
     }
 
     public void download(Activity activity, RuntimeCenterCatalog.Runtime runtime, Callback<Boolean> callback) {
@@ -73,8 +85,8 @@ public final class RuntimeCenterManager {
             return;
         }
         File destination = getDownloadFile(runtime);
-        if (destination == null || !destination.getParentFile().isDirectory() &&
-                !destination.getParentFile().mkdirs()) {
+        if (destination == null || (!destination.getParentFile().isDirectory() &&
+                !destination.getParentFile().mkdirs())) {
             if (callback != null) callback.call(false);
             return;
         }
@@ -82,15 +94,23 @@ public final class RuntimeCenterManager {
             if (callback != null) callback.call(true);
             return;
         }
+
         FileUtils.delete(destination);
         FileUtils.delete(getVerificationMarker(runtime));
         HttpUtils.download(activity, runtime.assetUrl, destination, downloaded -> {
-            boolean verified = downloaded && isVerifiedDownload(runtime);
-            if (!verified) {
+            if (!downloaded) {
                 FileUtils.delete(destination);
                 FileUtils.delete(getVerificationMarker(runtime));
+                if (callback != null) callback.call(false);
+                return;
             }
-            if (callback != null) callback.call(verified);
+            verifyDownloadAsync(runtime, verified -> {
+                if (!verified) {
+                    FileUtils.delete(destination);
+                    FileUtils.delete(getVerificationMarker(runtime));
+                }
+                if (callback != null) callback.call(verified);
+            });
         });
     }
 
@@ -115,46 +135,50 @@ public final class RuntimeCenterManager {
     }
 
     public void prepareInstall(RuntimeCenterCatalog.Runtime runtime, InstallCallback callback) {
-        if (runtime == null || !runtime.supportedOnCurrentLauncher || !isDownloaded(runtime)) {
+        if (runtime == null || !runtime.supportedOnCurrentLauncher) {
             if (callback != null) callback.onPrepared(null);
             return;
         }
 
-        File archive = getDownloadFile(runtime);
-        if (archive == null || !RuntimePackageVerifier.verify(archive,
-                runtime.fileSizeBytes, runtime.sha256)) {
-            deleteDownload(runtime);
-            if (callback != null) callback.onPrepared(null);
-            return;
-        }
-
-        WineInstaller.extractWineFileForInstallAsync(context, archive, extractedDir -> {
-            if (extractedDir == null) {
+        // Verify every install attempt, even when a prior download marker exists.
+        // This prevents a replaced or corrupted app-private archive from being installed.
+        verifyDownloadAsync(runtime, verified -> {
+            if (!verified) {
+                deleteDownload(runtime);
                 if (callback != null) callback.onPrepared(null);
                 return;
             }
-            WineInstaller.findWineVersionAsync(context, extractedDir, detectedWine -> {
-                if (detectedWine == null) {
-                    FileUtils.delete(extractedDir);
-                    if (callback != null) callback.onPrepared(null);
-                    return;
-                }
-                File executable = WineInstaller.findWineExecutable(new File(detectedWine.path));
-                if (!CompatibilityRuntimePackage.isX86_64Elf(executable)) {
-                    FileUtils.delete(extractedDir);
-                    android.util.Log.w("WinMali-Runtime", "Runtime rejected: x86-64 package does not contain an x86-64 Wine executable");
-                    if (callback != null) callback.onPrepared(null);
-                    return;
-                }
 
-                WineInfo managedWineInfo = new WineInfo(detectedWine.version,
-                    runtime.installSuffix, detectedWine.path, runtime.displayName);
-                if (!writeMetadata(new File(detectedWine.path), runtime, detectedWine.version)) {
-                    FileUtils.delete(extractedDir);
+            File archive = getDownloadFile(runtime);
+            WineInstaller.extractWineFileForInstallAsync(context, archive, extractedDir -> {
+                if (extractedDir == null) {
                     if (callback != null) callback.onPrepared(null);
                     return;
                 }
-                if (callback != null) callback.onPrepared(managedWineInfo);
+                WineInstaller.findWineVersionAsync(context, extractedDir, detectedWine -> {
+                    if (detectedWine == null) {
+                        FileUtils.delete(extractedDir);
+                        if (callback != null) callback.onPrepared(null);
+                        return;
+                    }
+                    File executable = WineInstaller.findWineExecutable(new File(detectedWine.path));
+                    if (!CompatibilityRuntimePackage.isX86_64Elf(executable)) {
+                        FileUtils.delete(extractedDir);
+                        android.util.Log.w("WinMali-Runtime",
+                            "Runtime rejected: x86-64 package does not contain an x86-64 Wine executable");
+                        if (callback != null) callback.onPrepared(null);
+                        return;
+                    }
+
+                    WineInfo managedWineInfo = new WineInfo(detectedWine.version,
+                        runtime.installSuffix, detectedWine.path, runtime.displayName);
+                    if (!writeMetadata(new File(detectedWine.path), runtime, detectedWine.version)) {
+                        FileUtils.delete(extractedDir);
+                        if (callback != null) callback.onPrepared(null);
+                        return;
+                    }
+                    if (callback != null) callback.onPrepared(managedWineInfo);
+                });
             });
         });
     }
