@@ -503,7 +503,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         if (activeGpuVendor != GpuCompatibilityProfile.Vendor.MALI) return;
 
         String safeDXWrapper = GpuCompatibilityProfile.resolveDXWrapperForLaunch(
-            dxwrapper, vendor, true);
+            dxwrapper, activeGpuVendor, true);
         if (!safeDXWrapper.equals(dxwrapper)) {
             android.util.Log.w("WinMali-GPU",
                 "Mali GPU detected; replacing automatic DXVK with WineD3D for this session");
@@ -512,13 +512,13 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
         if (dxwrapper.equals(DXWrappers.WINED3D)) {
             dxwrapperConfig[0] = GpuCompatibilityProfile.applyMaliWineD3DDefaults(
-                dxwrapperConfig[0], vendor);
+                dxwrapperConfig[0], activeGpuVendor);
             android.util.Log.i("WinMali-GPU",
                 "Using Mali WineD3D Vulkan renderer with Backbuffer offscreen rendering");
         }
 
         String safeVulkanDriver = GpuCompatibilityProfile.resolveVulkanDriverForLaunch(
-            graphicsDriver[0], vendor, true);
+            graphicsDriver[0], activeGpuVendor, true);
         if (!safeVulkanDriver.equals(graphicsDriver[0])) {
             android.util.Log.w("WinMali-GPU",
                 "Mali GPU detected; replacing automatic Turnip with Vortek for this session");
