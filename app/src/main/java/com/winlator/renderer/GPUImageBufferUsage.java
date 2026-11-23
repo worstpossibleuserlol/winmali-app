@@ -13,8 +13,9 @@ public final class GPUImageBufferUsage {
     private GPUImageBufferUsage() {}
 
     /**
-     * Initial implementation retained for the regression test: this deliberately
-     * reflects the old allocation policy and is corrected in the follow-up fix.
+     * The shared Vortek image is sampled by the host OpenGL display renderer
+     * after Vulkan renders into it. CPU-accessible images retain CPU write
+     * access and must still be declared as GPU-sampleable.
      */
     static long forCpuAccess(boolean cpuAccess) {
         return GPU_SAMPLED_IMAGE | (cpuAccess ? CPU_WRITE_OFTEN : GPU_COLOR_OUTPUT);
