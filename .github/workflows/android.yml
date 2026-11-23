@@ -87,7 +87,7 @@ jobs:
 
       - name: Verify APK output and bundled system assets
         run: |
-          APK=app/build/outputs/apk/debug/WinMali_2.0.0.apk
+          APK=app/build/outputs/apk/debug/WinMali_2.0.1.apk
           test -s "$APK"
           file "$APK"
 
@@ -138,10 +138,10 @@ jobs:
           test -s "$RUNNER_TEMP/common_dlls.json"
           python -m json.tool "$RUNNER_TEMP/common_dlls.json" > /dev/null
 
-      - name: Upload WinMali 2.0.0 APK
+      - name: Upload WinMali 2.0.1 APK
         uses: actions/upload-artifact@v4
         with:
-          name: WinMali_2.0.0
-          path: app/build/outputs/apk/debug/WinMali_2.0.0.apk
+          name: WinMali_2.0.1
+          path: app/build/outputs/apk/debug/WinMali_2.0.1.apk
           if-no-files-found: error
           retention-days: 30

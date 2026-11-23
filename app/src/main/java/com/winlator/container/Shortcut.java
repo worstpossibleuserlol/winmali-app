@@ -113,7 +113,7 @@ public class Shortcut {
         catch (JSONException e) {}
     }
 
-    public void saveData() {
+    public boolean saveData() {
         String content = "[Desktop Entry]\n";
         for (String line : FileUtils.readLines(file)) {
             if (line.contains("[Extra Data]")) break;
@@ -132,7 +132,7 @@ public class Shortcut {
             }
         }
 
-        FileUtils.writeString(file, content);
+        return FileUtils.writeString(file, content);
     }
 
     public boolean isLinkPath() {

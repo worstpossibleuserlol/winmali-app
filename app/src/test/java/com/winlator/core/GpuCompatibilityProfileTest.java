@@ -56,6 +56,14 @@ public class GpuCompatibilityProfileTest {
     }
 
     @Test
+    public void automaticGpuFallbackDoesNotOverrideExplicitShortcutSettings() {
+        assertTrue(GpuCompatibilityProfile.shouldApplyAutomaticSettings(true, false));
+        assertFalse(GpuCompatibilityProfile.shouldApplyAutomaticSettings(true, true));
+        assertFalse(GpuCompatibilityProfile.shouldApplyAutomaticSettings(false, false));
+        assertFalse(GpuCompatibilityProfile.shouldApplyAutomaticSettings(false, true));
+    }
+
+    @Test
     public void dxvkRequiresVulkan11AndSwapchain() {
         GpuCompatibilityProfile withoutSwapchain = GpuCompatibilityProfile.resolve(
             "Mali-G710", "ARM", vk(1, 3, 0), new String[0]);

@@ -222,7 +222,23 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                 screenInfo = resolveScreenInfo(shortcut.getExtra("screenSize", container.getScreenSize()));
 
                 String dinputMapperType = shortcut.getExtra("dinputMapperType");
-                if (!dinputMapperType.isEmpty()) winHandler.gamepadHandler.setDInputMapperType(Byte.parseByte(dinputMapperType));
+                if (!dinputMapperType.isEmpty()) {
+                    try {
+                        int mapperType = Integer.parseInt(dinputMapperType);
+                        if (mapperType == GamepadHandler.DINPUT_MAPPER_TYPE_STANDARD ||
+                            mapperType == GamepadHandler.DINPUT_MAPPER_TYPE_XINPUT) {
+                            winHandler.gamepadHandler.setDInputMapperType((byte)mapperType);
+                        }
+                        else {
+                            android.util.Log.w("WinMali-Input",
+                                "Ignoring an unsupported per-shortcut DirectInput mapper value: "+mapperType);
+                        }
+                    }
+                    catch (NumberFormatException error) {
+                        android.util.Log.w("WinMali-Input",
+                            "Ignoring an invalid per-shortcut DirectInput mapper value", error);
+                    }
+                }
 
                 win32AppWorkarounds.applyStartupWorkarounds(!shortcut.wmClass.isEmpty() ? shortcut.wmClass : shortcut.path);
             }
@@ -497,8 +513,14 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             GpuCompatibilityProfile.resolve(renderer, vendorName, 0, null).vendor;
         if (vendor != GpuCompatibilityProfile.Vendor.MALI) return;
 
+        boolean shortcutOverridesDXWrapper = shortcut != null &&
+            !shortcut.getExtra("dxwrapper").isEmpty();
+        boolean shortcutOverridesVulkanDriver = shortcut != null &&
+            !shortcut.getExtra("graphicsDriver").isEmpty();
+
         String safeDXWrapper = GpuCompatibilityProfile.resolveDXWrapperForLaunch(
-            dxwrapper, vendor, true);
+            dxwrapper, vendor, GpuCompatibilityProfile.shouldApplyAutomaticSettings(
+                automaticSettings, shortcutOverridesDXWrapper));
         if (!safeDXWrapper.equals(dxwrapper)) {
             android.util.Log.w("WinMali-GPU",
                 "Mali GPU detected; replacing automatic DXVK with WineD3D for this session");
@@ -507,7 +529,8 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         String safeVulkanDriver = GpuCompatibilityProfile.resolveVulkanDriverForLaunch(
-            graphicsDriver[0], vendor, true);
+            graphicsDriver[0], vendor, GpuCompatibilityProfile.shouldApplyAutomaticSettings(
+                automaticSettings, shortcutOverridesVulkanDriver));
         if (!safeVulkanDriver.equals(graphicsDriver[0])) {
             android.util.Log.w("WinMali-GPU",
                 "Mali GPU detected; replacing automatic Turnip with Vortek for this session");

@@ -8,8 +8,8 @@ android {
         applicationId 'com.winlator'
         minSdkVersion 29
         targetSdkVersion 28
-        versionCode 38
-        versionName "2.0.0"
+        versionCode 39
+        versionName "2.0.1"
     }
 
     buildTypes {
@@ -38,7 +38,7 @@ android {
 
     applicationVariants.all { variant ->
         variant.outputs.all {
-            outputFileName = "WinMali_2.0.0.apk"
+            outputFileName = "WinMali_2.0.1.apk"
         }
     }
 }

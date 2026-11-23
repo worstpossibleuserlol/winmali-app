@@ -130,6 +130,12 @@ public final class GpuCompatibilityProfile {
         });
     }
 
+    /** Returns whether automatic graphics settings may override the selected value. */
+    public static boolean shouldApplyAutomaticSettings(boolean automaticSettings,
+            boolean shortcutOverride) {
+        return automaticSettings && !shortcutOverride;
+    }
+
     /**
      * Applies the automatic-profile safety fallback to an existing container.
      * Explicit/manual choices are preserved when automatic GPU settings are off.
