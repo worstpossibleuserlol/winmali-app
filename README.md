@@ -4,6 +4,15 @@ WinMali is an Android application that lets you run Windows (x86_64) application
 This repository stores the latest updates for the WinMali app source.
 For more information and releases, please visit the main repository: https://github.com/worstpossibleuserlol/WinMali
 
+## Compatibility features
+
+- Per-shortcut compatibility profiles for different performance and stability starting points.
+- Independently configurable graphics drivers, Direct3D wrappers, Box64 presets, and environment variables.
+- Mali-aware defaults that avoid automatically selecting Adreno-only graphics drivers.
+- Experimental graphics options remain opt-in; compatibility depends on the device, driver, runtime, and application.
+
+Profiles are starting points, not compatibility guarantees. Individual shortcut settings remain editable.
+
 # Credits and Third-party apps
 
 - GLIBC Patches by [Termux Pacman](https://github.com/termux-pacman/glibc-packages)
