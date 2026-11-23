@@ -15,9 +15,11 @@ static ResourceMemory* internalAllocate() {
     return resourceMemory;
 }
 
-static AHardwareBuffer* allocateHardwareBuffer(int size) {
+static AHardwareBuffer* allocateHardwareBuffer(VkDeviceSize size) {
+    // AHardwareBuffer BLOB width is uint32_t; reject oversized allocations before conversion.
+    if (size == 0 || size > UINT32_MAX) return NULL;
     AHardwareBuffer_Desc buffDesc = {0};
-    buffDesc.width = size;
+    buffDesc.width = (uint32_t)size;
     buffDesc.height = 1;
     buffDesc.layers = 1;
     buffDesc.usage = AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN | AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN;

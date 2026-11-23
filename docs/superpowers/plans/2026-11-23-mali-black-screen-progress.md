@@ -25,3 +25,5 @@ Task 6: command-buffer allocation failure now frees its host-side handle array a
 Task 7: hardened Vortek resource-memory allocation against calloc/AHardwareBuffer allocation failure, added the explicit AUTO enum case, accepted valid descriptor 0, and duplicated the borrowed AHardwareBuffer native-handle FD before storing/closing it. Fixed the missing stdlib declaration include for strtod in the native utility header.
 
 Task 8: fixed the shared CLOSEFD macro to close any valid descriptor (>= 0), including descriptor 0. The new resource-memory paths rely on the standard -1 invalid-FD sentinel, so zero must remain a closable/valid descriptor.
+
+Task 9 (final): fixed a size-truncation bug in Vortek's Android hardware-buffer allocator. Vulkan allocation sizes are 64-bit VkDeviceSize, but the helper accepted int. It now accepts VkDeviceSize and rejects zero or values above the Android BLOB width limit before conversion.
