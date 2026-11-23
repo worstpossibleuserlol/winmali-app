@@ -151,6 +151,25 @@ public abstract class TarCompressorUtils {
         return completed;
     }
 
+    public static Type detectType(File source) {
+        if (source == null || !source.isFile()) return null;
+        try (BufferedInputStream buffered = new BufferedInputStream(new FileInputStream(source))) {
+            buffered.mark(8);
+            byte[] magic = new byte[6];
+            int count = buffered.read(magic);
+            buffered.reset();
+            if (count >= 6 && (magic[0] & 0xff) == 0xfd && magic[1] == 0x37 &&
+                magic[2] == 0x7a && magic[3] == 0x58 && magic[4] == 0x5a && magic[5] == 0x00) return Type.XZ;
+            if (count >= 4 && (magic[0] & 0xff) == 0x28 && (magic[1] & 0xff) == 0xb5 &&
+                (magic[2] & 0xff) == 0x2f && (magic[3] & 0xff) == 0xfd) return Type.ZSTD;
+            if (count >= 2 && (magic[0] & 0xff) == 0x1f && (magic[1] & 0xff) == 0x8b) return Type.GZIP;
+            return null;
+        }
+        catch (IOException | RuntimeException error) {
+            return null;
+        }
+    }
+
     public static Type detectType(Context context, Uri source) {
         if (context == null || source == null) return null;
         try (InputStream input = context.getContentResolver().openInputStream(source);

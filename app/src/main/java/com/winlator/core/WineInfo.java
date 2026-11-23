@@ -22,20 +22,27 @@ public class WineInfo implements Parcelable {
     public final String subversion;
     public final String path;
     private final boolean mainRuntime;
+    private final String displayName;
 
     public WineInfo(String version) {
-        this(version, null, null, true);
+        this(version, null, null, true, null);
     }
 
     public WineInfo(String version, String subversion, String path) {
-        this(version, subversion, path, false);
+        this(version, subversion, path, false, null);
     }
 
-    private WineInfo(String version, String subversion, String path, boolean mainRuntime) {
+    public WineInfo(String version, String subversion, String path, String displayName) {
+        this(version, subversion, path, false, displayName);
+    }
+
+    private WineInfo(String version, String subversion, String path,
+            boolean mainRuntime, String displayName) {
         this.version = version;
         this.subversion = subversion != null && !subversion.isEmpty() ? subversion : null;
         this.path = path;
         this.mainRuntime = mainRuntime;
+        this.displayName = displayName != null && !displayName.trim().isEmpty() ? displayName.trim() : null;
     }
 
     private WineInfo(Parcel in) {
@@ -43,6 +50,7 @@ public class WineInfo implements Parcelable {
         subversion = in.readString();
         path = in.readString();
         mainRuntime = in.readInt() != 0;
+        displayName = in.readString();
     }
 
     public String identifier() {
@@ -56,7 +64,8 @@ public class WineInfo implements Parcelable {
     @NonNull
     @Override
     public String toString() {
-        String result = "Wine "+fullVersion()+(mainRuntime ? " (Custom)" : "");
+        String result = displayName != null ? displayName :
+            "Wine "+fullVersion()+(mainRuntime ? " (Custom)" : "");
         if (path != null) {
             String architectures = CompatibilityRuntimeManifest.getArchitectureSummary(new File(path));
             if (!architectures.equals("guest ABI not detected")) result += " ["+architectures+"]";
@@ -85,6 +94,7 @@ public class WineInfo implements Parcelable {
         dest.writeString(subversion);
         dest.writeString(path);
         dest.writeInt(mainRuntime ? 1 : 0);
+        dest.writeString(displayName);
     }
 
     static String parseVersionIdentifier(String identifier) {
@@ -111,7 +121,8 @@ public class WineInfo implements Parcelable {
 
         File installedWineDir = RootFS.find(context).getInstalledWineDir();
         String path = (new File(installedWineDir, identifier)).getPath();
-        return new WineInfo(version, null, path);
+        String displayName = RuntimeCenterManager.readDisplayName(new File(path));
+        return new WineInfo(version, null, path, displayName);
     }
 
     public static boolean isMainWineVersion(String wineVersion) {

@@ -115,8 +115,7 @@ public final class RuntimeCenterManager {
     }
 
     public void prepareInstall(RuntimeCenterCatalog.Runtime runtime, InstallCallback callback) {
-        if (runtime == null || !runtime.supportedOnCurrentLauncher ||
-            !isSelectable(runtime, isInstalled(runtime)) || !isDownloaded(runtime)) {
+        if (runtime == null || !runtime.supportedOnCurrentLauncher || !isDownloaded(runtime)) {
             if (callback != null) callback.onPrepared(null);
             return;
         }
@@ -176,6 +175,12 @@ public final class RuntimeCenterManager {
 
     public boolean isDefault(RuntimeCenterCatalog.Runtime runtime) {
         return runtime != null && runtime.id.equals(getDefaultRuntimeId());
+    }
+
+    public void clearDefaultIfMatches(String runtimeId) {
+        if (runtimeId != null && runtimeId.equals(preferences.getString(KEY_DEFAULT_RUNTIME, RuntimeCenterCatalog.DEFAULT_RUNTIME_ID))) {
+            preferences.edit().remove(KEY_DEFAULT_RUNTIME).apply();
+        }
     }
 
     /** Returns the installed Wine identifier to preselect for new containers, or null for built-in Wine. */

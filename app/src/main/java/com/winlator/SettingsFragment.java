@@ -15,6 +15,8 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
+import android.widget.Button;
+import android.widget.ScrollView;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -47,7 +49,8 @@ import com.winlator.contentdialog.SoundFontTestDialog;
 import com.winlator.core.AppUtils;
 import com.winlator.core.ArrayUtils;
 import com.winlator.core.Callback;
-import com.winlator.core.CompatibilityRuntimeCatalog;
+import com.winlator.core.RuntimeCenterCatalog;
+import com.winlator.core.RuntimeCenterManager;
 import com.winlator.core.DefaultVersion;
 import com.winlator.core.FileUtils;
 import com.winlator.core.GPUHelper;
@@ -125,7 +128,7 @@ public class SettingsFragment extends Fragment {
         preferences = PreferenceManager.getDefaultSharedPreferences(context);
 
         view.findViewById(R.id.BTGPUDiagnostics).setOnClickListener((v) -> showGPUDiagnostics(context));
-        view.findViewById(R.id.BTCompatibilityRuntimeBundle).setOnClickListener((v) -> showCompatibilityRuntimeBundle(context));
+        view.findViewById(R.id.BTCompatibilityRuntimeBundle).setOnClickListener((v) -> showRuntimeCenter(context));
 
         final Spinner sSoundFont = view.findViewById(R.id.SSoundFont);
         String soundfont = preferences.getString("soundfont", null);
@@ -460,7 +463,7 @@ public class SettingsFragment extends Fragment {
         dialog.setIcon(R.drawable.icon_wine);
 
         EditText etVersion = dialog.findViewById(R.id.ETVersion);
-        etVersion.setText("Wine "+wineInfo.version+(wineInfo.subversion != null ? " ("+wineInfo.subversion+")" : ""));
+        etVersion.setText(wineInfo.toString());
 
         final EditText etSize = dialog.findViewById(R.id.ETSize);
         final AtomicLong totalSizeRef = new AtomicLong();
@@ -473,27 +476,165 @@ public class SettingsFragment extends Fragment {
         dialog.show();
     }
 
-    private void showCompatibilityRuntimeBundle(Context context) {
-        StringBuilder details = new StringBuilder();
-        details.append("Upstream release references (snapshot ")
-            .append(CompatibilityRuntimeCatalog.SNAPSHOT_DATE).append("):\\n\\n");
-        for (CompatibilityRuntimeCatalog.Release release : CompatibilityRuntimeCatalog.getReleases()) {
-            details.append(release.getTitle()).append("\\n")
-                .append(release.note).append("\\n\\n");
-        }
-        details.append(CompatibilityRuntimeCatalog.getArchitectureExplanation())
-            .append("\\n\\n")
-            .append("Import an Android/AArch64 Wine build with the existing Wine installer. ")
-            .append("A winmali-runtime.json manifest can declare and validate x86, x86_64, and verified ARM64EC guest libraries. ")
-            .append("Proton is listed for tracking, but this 2.0.0 beta does not yet include an Android Proton session launcher; ")
-            .append("desktop Proton archives are not Android-compatible.");
+    private void showRuntimeCenter(Context context) {
+        final RuntimeCenterManager runtimeManager = new RuntimeCenterManager(context);
+        final LinearLayout runtimeList = new LinearLayout(context);
+        runtimeList.setOrientation(LinearLayout.VERTICAL);
+        int padding = (int)(16 * context.getResources().getDisplayMetrics().density);
+        runtimeList.setPadding(padding, 0, padding, padding);
 
-        new AlertDialog.Builder(context)
+        ScrollView scrollView = new ScrollView(context);
+        scrollView.setFillViewport(false);
+        scrollView.addView(runtimeList);
+
+        final AlertDialog dialog = new AlertDialog.Builder(context)
             .setTitle(R.string.compatibility_runtime_bundle)
-            .setMessage(details.toString())
-            .setPositiveButton("Import Wine build", (dialog, which) -> selectWineFileForInstall())
+            .setView(scrollView)
             .setNegativeButton(android.R.string.ok, null)
-            .show();
+            .create();
+
+        Runnable refresh = () -> {
+            runtimeList.removeAllViews();
+            TextView introduction = new TextView(context);
+            introduction.setText(R.string.runtime_center_description);
+            introduction.setTextSize(13);
+            introduction.setPadding(0, 0, 0, padding);
+            runtimeList.addView(introduction);
+
+            for (RuntimeCenterCatalog.Runtime runtime : RuntimeCenterCatalog.getRuntimes()) {
+                LinearLayout card = new LinearLayout(context);
+                card.setOrientation(LinearLayout.VERTICAL);
+                int cardPadding = (int)(12 * context.getResources().getDisplayMetrics().density);
+                card.setPadding(cardPadding, cardPadding, cardPadding, cardPadding);
+                LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                cardParams.bottomMargin = padding / 2;
+                runtimeList.addView(card, cardParams);
+
+                TextView title = new TextView(context);
+                title.setText(runtime.displayName);
+                title.setTextSize(16);
+                title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
+                card.addView(title);
+
+                TextView details = new TextView(context);
+                details.setText(runtime.family.label+" · "+runtime.getArchitectureLabel()+" · "+
+                    StringUtils.formatBytes(runtime.fileSizeBytes));
+                details.setTextSize(12);
+                details.setPadding(0, 4, 0, 4);
+                card.addView(details);
+
+                WineInfo installedWine = runtimeManager.getInstalledWineInfo(runtime);
+                boolean installed = installedWine != null;
+                boolean downloaded = !installed && runtimeManager.isDownloaded(runtime);
+                boolean selected = runtimeManager.isDefault(runtime);
+                TextView status = new TextView(context);
+                if (installed) status.setText(selected ? R.string.runtime_center_default : R.string.runtime_center_installed);
+                else if (downloaded && runtime.supportedOnCurrentLauncher) status.setText(R.string.runtime_center_downloaded);
+                else if (downloaded) status.setText(R.string.runtime_center_unsupported);
+                else status.setText(R.string.runtime_center_not_downloaded);
+                status.setTextSize(12);
+                card.addView(status);
+
+                TextView warning = new TextView(context);
+                warning.setText(runtime.warning);
+                warning.setTextSize(12);
+                warning.setPadding(0, 4, 0, 6);
+                card.addView(warning);
+
+                Button action = new Button(context);
+                if (installed) {
+                    action.setText(selected ? R.string.runtime_center_default : R.string.runtime_center_set_default);
+                    action.setEnabled(!selected);
+                    action.setOnClickListener(v -> {
+                        if (runtimeManager.setDefault(runtime)) refresh.run();
+                        else AppUtils.showToast(context, R.string.runtime_center_set_default_failed);
+                    });
+                    card.addView(action);
+
+                    Button remove = new Button(context);
+                    remove.setText(R.string.runtime_center_remove_runtime);
+                    remove.setOnClickListener(v -> ContentDialog.confirm(context,
+                        R.string.do_you_want_to_remove_this_wine_version, () ->
+                            removeInstalledWine(installedWine, () -> {
+                                runtimeManager.clearDefaultIfMatches(runtime.id);
+                                refresh.run();
+                            })));
+                    card.addView(remove);
+                }
+                else if (downloaded && runtime.supportedOnCurrentLauncher) {
+                    action.setText(R.string.runtime_center_install);
+                    action.setOnClickListener(v -> {
+                        action.setEnabled(false);
+                        action.setText(R.string.runtime_center_verifying);
+                        runtimeManager.prepareInstall(runtime, wineInfo -> {
+                            Activity activity = getActivity();
+                            if (activity == null) return;
+                            activity.runOnUiThread(() -> {
+                                if (wineInfo == null) {
+                                    AppUtils.showToast(context, R.string.unable_to_install_wine);
+                                    refresh.run();
+                                }
+                                else showWineInstallDialog(wineInfo);
+                            });
+                        });
+                    });
+                    card.addView(action);
+
+                    Button remove = new Button(context);
+                    remove.setText(R.string.runtime_center_remove_download);
+                    remove.setOnClickListener(v -> {
+                        runtimeManager.deleteDownload(runtime);
+                        refresh.run();
+                    });
+                    card.addView(remove);
+                }
+                else if (downloaded) {
+                    action.setText(R.string.runtime_center_unsupported);
+                    action.setEnabled(false);
+                    card.addView(action);
+
+                    Button remove = new Button(context);
+                    remove.setText(R.string.runtime_center_remove_download);
+                    remove.setOnClickListener(v -> {
+                        runtimeManager.deleteDownload(runtime);
+                        refresh.run();
+                    });
+                    card.addView(remove);
+                }
+                else {
+                    action.setText(R.string.runtime_center_download);
+                    action.setOnClickListener(v -> {
+                        action.setEnabled(false);
+                        action.setText(R.string.runtime_center_downloading);
+                        runtimeManager.download(getActivity(), runtime, success -> {
+                            Activity activity = getActivity();
+                            if (activity == null) return;
+                            activity.runOnUiThread(() -> {
+                                if (!success) AppUtils.showToast(context, R.string.runtime_center_download_failed);
+                                refresh.run();
+                            });
+                        });
+                    });
+                    card.addView(action);
+                }
+
+                Button source = new Button(context);
+                source.setText(R.string.runtime_center_release_notes);
+                source.setOnClickListener(v -> {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(runtime.releaseUrl)));
+                    }
+                    catch (Exception error) {
+                        AppUtils.showToast(context, R.string.unable_to_import_profile);
+                    }
+                });
+                card.addView(source);
+            }
+        };
+
+        refresh.run();
+        dialog.show();
     }
 
     private void showGPUDiagnostics(Context context) {

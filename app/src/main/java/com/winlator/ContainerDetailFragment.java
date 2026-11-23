@@ -54,6 +54,7 @@ import com.winlator.core.PreloaderDialog;
 import com.winlator.core.StringUtils;
 import com.winlator.core.WineInfo;
 import com.winlator.core.WineInstaller;
+import com.winlator.core.RuntimeCenterManager;
 import com.winlator.core.WineRegistryEditor;
 import com.winlator.core.WineThemeManager;
 import com.winlator.core.WineUtils;
@@ -621,11 +622,25 @@ public class ContainerDetailFragment extends Fragment {
         popupMenu.show();
     }
 
-    private void loadWineVersionSpinner(final View view, Spinner sWineVersion, final ArrayList<WineInfo> wineInfos) {
-        final Context context = getContext();
+    private void loadWineVersionSpinner(final View view, final Spinner sWineVersion, final ArrayList<WineInfo> wineInfos) {
+        Context context = getContext();
         sWineVersion.setEnabled(!isEditMode());
         view.findViewById(R.id.LLWineVersion).setVisibility(View.VISIBLE);
         sWineVersion.setAdapter(new ArrayAdapter<>(context, android.R.layout.simple_spinner_dropdown_item, wineInfos));
-        if (isEditMode()) AppUtils.setSpinnerSelectionFromValue(sWineVersion, WineInfo.fromIdentifier(context, container.getWineVersion()).toString());
+        if (isEditMode()) {
+            AppUtils.setSpinnerSelectionFromValue(sWineVersion,
+                WineInfo.fromIdentifier(context, container.getWineVersion()).toString());
+        }
+        else {
+            String preferredIdentifier = new RuntimeCenterManager(context).getPreferredWineIdentifier();
+            if (preferredIdentifier != null) {
+                for (int i = 0; i < wineInfos.size(); i++) {
+                    if (preferredIdentifier.equals(wineInfos.get(i).identifier())) {
+                        sWineVersion.setSelection(i);
+                        break;
+                    }
+                }
+            }
+        }
     }
 }
