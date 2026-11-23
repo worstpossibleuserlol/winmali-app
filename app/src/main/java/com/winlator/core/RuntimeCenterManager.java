@@ -69,7 +69,7 @@ public final class RuntimeCenterManager {
         RuntimePackageVerifier.verifyAsync(archive, runtime.fileSizeBytes, runtime.sha256, verified -> {
             File marker = getVerificationMarker(runtime);
             boolean marked = verified && marker != null && FileUtils.writeString(marker,
-                runtime.sha256+"\\n"+runtime.fileSizeBytes+"\\n"+archive.lastModified());
+                runtime.sha256+":"+runtime.fileSizeBytes+":"+archive.lastModified());
             if (!marked && marker != null) FileUtils.delete(marker);
             if (callback != null) callback.call(marked);
         });
