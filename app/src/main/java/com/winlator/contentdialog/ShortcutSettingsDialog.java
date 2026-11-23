@@ -177,6 +177,9 @@ public class ShortcutSettingsDialog extends ContentDialog {
                 if (preset.experimental) {
                     message += "\n" + context.getString(R.string.game_compatibility_profile_warning);
                 }
+                else if (GameCompatibilityProfiles.PERFORMANCE.equals(preset.id)) {
+                    message += "\n" + context.getString(R.string.game_compatibility_profile_performance_warning);
+                }
                 tvGameCompatibilityProfileInfo.setText(message);
             }
 
