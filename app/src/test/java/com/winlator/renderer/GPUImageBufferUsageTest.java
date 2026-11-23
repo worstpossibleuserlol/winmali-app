@@ -15,7 +15,7 @@ public class GPUImageBufferUsageTest {
         assertTrue("OpenGL must be allowed to sample the shared buffer as a texture",
             (usage & GPUImageBufferUsage.GPU_SAMPLED_IMAGE) != 0);
         assertFalse("The GPU-only path must not request CPU write access",
-            (usage & GPUImageBufferUsage.CPU_WRITE_OFTEN) != GPUImageBufferUsage.CPU_WRITE_OFTEN);
+            (usage & GPUImageBufferUsage.CPU_WRITE_OFTEN) != 0);
     }
 
     @Test

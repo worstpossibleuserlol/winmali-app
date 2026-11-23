@@ -11,3 +11,5 @@ Task 1: RED observed — CI run 45189438089, commit 4dc0718: 183 tests completed
 Task 2: implemented the combined GPU_SAMPLED_IMAGE + GPU_COLOR_OUTPUT / CPU_WRITE_OFTEN allocation policy; passed that usage mask across Java/JNI; added null/error handling for buffer allocation and CPU lock, EGL client-buffer/image creation, GL image attachment, and balanced AHardwareBuffer reference release.
 
 Task 3: hardened Vortek's Vulkan import against missing/zero-sized AHardwareBuffers and checked the VkResult from vkGetAndroidHardwareBufferPropertiesANDROID. Hardened ring-buffer setup to check allocations before dereferencing, close partial file descriptors, and clean up partial setup; hardened RingBuffer_create against calloc failure.
+
+CI note: commit 8774d84 passed both sampled-image-positive assertions but exposed an inverted negative assertion in the newly added test. Corrected the test to assert that the CPU-write mask is zero for the GPU-only allocation. No production-code change was required for this test failure.
