@@ -26,7 +26,7 @@ public class RuntimePackageVerifierTest {
     public void acceptsFileWithMatchingSizeAndSha256() throws Exception {
         File file = writeFile("runtime.wcp", "verified runtime package");
         assertTrue(RuntimePackageVerifier.verify(file, 24,
-            "c188fe0a8bb4aeed92b34d5f8e868a8a73801fcfdfc5a0c0ce9d8ad13e2ec68a"));
+            "7dac3c033ef88bce05338d2fdf74696a1ab24f6d81523ef633b59f9c9c48818c"));
     }
 
     @Test
@@ -40,7 +40,7 @@ public class RuntimePackageVerifierTest {
     public void rejectsFileWithIncorrectSize() throws Exception {
         File file = writeFile("runtime.wcp", "verified runtime package");
         assertFalse(RuntimePackageVerifier.verify(file, 25,
-            "c188fe0a8bb4aeed92b34d5f8e868a8a73801fcfdfc5a0c0ce9d8ad13e2ec68a"));
+            "7dac3c033ef88bce05338d2fdf74696a1ab24f6d81523ef633b59f9c9c48818c"));
     }
 
     @Test
