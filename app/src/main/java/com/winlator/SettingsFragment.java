@@ -493,7 +493,8 @@ public class SettingsFragment extends Fragment {
             .setNegativeButton(android.R.string.ok, null)
             .create();
 
-        Runnable refresh = () -> {
+        final Runnable[] refreshRef = new Runnable[1];
+        refreshRef[0] = () -> {
             runtimeList.removeAllViews();
             TextView introduction = new TextView(context);
             introduction.setText(R.string.runtime_center_description);
@@ -547,7 +548,7 @@ public class SettingsFragment extends Fragment {
                     action.setText(selected ? R.string.runtime_center_default : R.string.runtime_center_set_default);
                     action.setEnabled(!selected);
                     action.setOnClickListener(v -> {
-                        if (runtimeManager.setDefault(runtime)) refresh.run();
+                        if (runtimeManager.setDefault(runtime)) refreshRef[0].run();
                         else AppUtils.showToast(context, R.string.runtime_center_set_default_failed);
                     });
                     card.addView(action);
@@ -558,7 +559,7 @@ public class SettingsFragment extends Fragment {
                         R.string.do_you_want_to_remove_this_wine_version, () ->
                             removeInstalledWine(installedWine, () -> {
                                 runtimeManager.clearDefaultIfMatches(runtime.id);
-                                refresh.run();
+                                refreshRef[0].run();
                             })));
                     card.addView(remove);
                 }
@@ -573,7 +574,7 @@ public class SettingsFragment extends Fragment {
                             activity.runOnUiThread(() -> {
                                 if (wineInfo == null) {
                                     AppUtils.showToast(context, R.string.unable_to_install_wine);
-                                    refresh.run();
+                                    refreshRef[0].run();
                                 }
                                 else showWineInstallDialog(wineInfo);
                             });
@@ -585,7 +586,7 @@ public class SettingsFragment extends Fragment {
                     remove.setText(R.string.runtime_center_remove_download);
                     remove.setOnClickListener(v -> {
                         runtimeManager.deleteDownload(runtime);
-                        refresh.run();
+                        refreshRef[0].run();
                     });
                     card.addView(remove);
                 }
@@ -598,7 +599,7 @@ public class SettingsFragment extends Fragment {
                     remove.setText(R.string.runtime_center_remove_download);
                     remove.setOnClickListener(v -> {
                         runtimeManager.deleteDownload(runtime);
-                        refresh.run();
+                        refreshRef[0].run();
                     });
                     card.addView(remove);
                 }
@@ -612,7 +613,7 @@ public class SettingsFragment extends Fragment {
                             if (activity == null) return;
                             activity.runOnUiThread(() -> {
                                 if (!success) AppUtils.showToast(context, R.string.runtime_center_download_failed);
-                                refresh.run();
+                                refreshRef[0].run();
                             });
                         });
                     });
@@ -633,7 +634,7 @@ public class SettingsFragment extends Fragment {
             }
         };
 
-        refresh.run();
+        refreshRef[0].run();
         dialog.show();
     }
 
