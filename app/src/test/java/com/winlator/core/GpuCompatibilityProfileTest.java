@@ -64,14 +64,58 @@ public class GpuCompatibilityProfileTest {
     }
 
     @Test
-    public void maliWineD3DDefaultsPreserveExplicitRendererAndOffscreenMode() {
+    public void maliWineD3DOverridesStoredLegacyUiDefaultsToVulkanAndBackbuffer() {
+        // The WineD3D configuration UI persists these defaults when a user
+        // opens and confirms the dialog, even without choosing them.
         KeyValueSet config = new KeyValueSet();
         config.put("renderer", "gl");
         config.put("OffscreenRenderingMode", "fbo");
         GpuCompatibilityProfile.applyMaliWineD3DDefaults(config,
             GpuCompatibilityProfile.Vendor.MALI);
-        assertEquals("gl", config.get("renderer"));
-        assertEquals("fbo", config.get("OffscreenRenderingMode"));
+        assertEquals("vulkan", config.get("renderer"));
+        assertEquals("backbuffer", config.get("OffscreenRenderingMode"));
+    }
+
+    @Test
+    public void maliWineD3DDefaultsPreserveNonDefaultExplicitChoices() {
+        KeyValueSet config = new KeyValueSet();
+        config.put("renderer", "gdi");
+        config.put("OffscreenRenderingMode", "backbuffer");
+        GpuCompatibilityProfile.applyMaliWineD3DDefaults(config,
+            GpuCompatibilityProfile.Vendor.MALI);
+        assertEquals("gdi", config.get("renderer"));
+        assertEquals("backbuffer", config.get("OffscreenRenderingMode"));
+    }
+
+    @Test
+    public void maliEnvironmentDisablesMesaGlThreadAndAddsBox64CompatibilityDefaults() {
+        EnvVars envVars = new EnvVars(Container.DEFAULT_ENV_VARS);
+        GpuCompatibilityProfile.applyMaliEnvironmentDefaults(envVars,
+            GpuCompatibilityProfile.Vendor.MALI);
+        assertEquals("0", envVars.get("mesa_glthread"));
+        assertEquals("1", envVars.get("BOX64_MMAP32"));
+        assertEquals("2", envVars.get("BOX64_SAFEFLAGS"));
+    }
+
+    @Test
+    public void maliEnvironmentPreservesExplicitNonDefaultEnvironmentValues() {
+        EnvVars envVars = new EnvVars(
+            "mesa_glthread=false BOX64_MMAP32=0 BOX64_SAFEFLAGS=1");
+        GpuCompatibilityProfile.applyMaliEnvironmentDefaults(envVars,
+            GpuCompatibilityProfile.Vendor.MALI);
+        assertEquals("false", envVars.get("mesa_glthread"));
+        assertEquals("0", envVars.get("BOX64_MMAP32"));
+        assertEquals("1", envVars.get("BOX64_SAFEFLAGS"));
+    }
+
+    @Test
+    public void nonMaliEnvironmentValuesAreNotModified() {
+        EnvVars envVars = new EnvVars(Container.DEFAULT_ENV_VARS);
+        GpuCompatibilityProfile.applyMaliEnvironmentDefaults(envVars,
+            GpuCompatibilityProfile.Vendor.ADRENO);
+        assertEquals("true", envVars.get("mesa_glthread"));
+        assertEquals("", envVars.get("BOX64_MMAP32"));
+        assertEquals("", envVars.get("BOX64_SAFEFLAGS"));
     }
 
     @Test
