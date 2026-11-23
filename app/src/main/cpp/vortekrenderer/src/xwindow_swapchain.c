@@ -55,6 +55,11 @@ static VkResult createWindowImage(XWindowSwapchain* swapchain, VkFormat imageFor
     swapchain->imageSize[0] = ahbDesc.width;
     swapchain->imageSize[1] = ahbDesc.height;
 
+    // The drawable owns the Java-side reference. Keep a separate reference
+    // alive for the lifetime of the Vulkan imported memory object.
+    AHardwareBuffer_acquire(hardwareBuffer);
+    swapchain->windowHardwareBuffer = hardwareBuffer;
+
     VkExternalFormatANDROID externalFormatAndroid = {0};
     externalFormatAndroid.sType = VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID;
     externalFormatAndroid.externalFormat = 0;
@@ -205,6 +210,7 @@ static VkResult createCopyCommandBuffers(XWindowSwapchain* swapchain, uint32_t g
     commandBufferInfo.commandBufferCount = swapchain->imageCount;
 
     swapchain->commandBuffers = calloc(swapchain->imageCount, sizeof(VkCommandBuffer));
+    if (swapchain->commandBuffers == NULL) return VK_ERROR_OUT_OF_HOST_MEMORY;
     result = vulkanWrapper.vkAllocateCommandBuffers(swapchain->device, &commandBufferInfo, swapchain->commandBuffers);
     return result;
 }
@@ -235,6 +241,10 @@ VkSurfaceFormatKHR* getSurfaceFormats(uint32_t* formatCount) {
     static const VkFormat supportedFormats[] = {VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_SRGB};
     int supportedFormatCount = ARRAY_SIZE(supportedFormats);
     VkSurfaceFormatKHR* surfaceFormats = calloc(supportedFormatCount, sizeof(VkSurfaceFormatKHR));
+    if (surfaceFormats == NULL) {
+        if (formatCount) *formatCount = 0;
+        return NULL;
+    }
 
     if (formatCount) *formatCount = supportedFormatCount;
 
@@ -248,11 +258,13 @@ VkSurfaceFormatKHR* getSurfaceFormats(uint32_t* formatCount) {
 
 XWindowSwapchain* XWindowSwapchain_create(VkDevice device, uint32_t graphicsQueueIndex, VkSwapchainCreateInfoKHR* swapchainInfo, JMethods* jmethods, int windowId) {
     XWindowSwapchain* swapchain = calloc(1, sizeof(XWindowSwapchain));
+    if (swapchain == NULL) return NULL;
     swapchain->device = device;
     swapchain->windowId = windowId;
     swapchain->presentMode = swapchainInfo->presentMode;
     swapchain->imageCount = swapchainInfo->minImageCount;
     swapchain->images = calloc(swapchain->imageCount, sizeof(XWindowSwapchain_Image));
+    if (swapchain->images == NULL) goto error;
     swapchain->jmethods = jmethods;
     getWindowSize(swapchain->jmethods, windowId, swapchain->windowSize);
 
@@ -290,6 +302,12 @@ void XWindowSwapchain_destroy(VkDevice device, XWindowSwapchain* swapchain) {
         swapchain->windowMemory = VK_NULL_HANDLE;
     }
 
+    // Release only after Vulkan no longer references the imported buffer.
+    if (swapchain->windowHardwareBuffer) {
+        AHardwareBuffer_release(swapchain->windowHardwareBuffer);
+        swapchain->windowHardwareBuffer = NULL;
+    }
+
     if (swapchain->commandBuffers) {
         vulkanWrapper.vkFreeCommandBuffers(device, swapchain->commandPool, swapchain->imageCount, swapchain->commandBuffers);
         MEMFREE(swapchain->commandBuffers);
@@ -300,7 +318,7 @@ void XWindowSwapchain_destroy(VkDevice device, XWindowSwapchain* swapchain) {
         swapchain->commandPool = NULL;
     }
 
-    for (int i = 0; i < swapchain->imageCount; i++) {
+    for (int i = 0; swapchain->images && i < swapchain->imageCount; i++) {
         XWindowSwapchain_Image* swapchainImage = &swapchain->images[i];
 
         if (swapchain->presentMode != VK_PRESENT_MODE_IMMEDIATE_KHR) {

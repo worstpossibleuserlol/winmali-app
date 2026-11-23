@@ -15,3 +15,7 @@ Task 3: hardened Vortek's Vulkan import against missing/zero-sized AHardwareBuff
 CI note: commit 8774d84 passed both sampled-image-positive assertions but exposed an inverted negative assertion in the newly added test. Corrected the test to assert that the CPU-write mask is zero for the GPU-only allocation. No production-code change was required for this test failure.
 
 Final review: self-review (no subagent tool). Reviewed the GPUImage Java/JNI contract, EGL image lifetime, Vortek Java callback and Vulkan AHardwareBuffer import, plus partial VkContext ring-buffer allocation/cleanup. Corrected a stale helper comment. Build/CI verifies source compilation and tests only; actual Mali-G610 presentation remains unverified until installed and tested on-device.
+
+Task 4: fixed Vulkan AHardwareBuffer ownership — each XWindowSwapchain now takes its own reference to the imported AHardwareBuffer and releases it only after destroying the Vulkan image and freeing imported memory. This prevents the Java drawable from freeing a buffer still referenced by the Vulkan swapchain.
+
+Task 5: hardened low-memory swapchain creation — check swapchain/image/command-buffer allocations, handle surface-format allocation failure, prevent cleanup from dereferencing a null image array, and check VkContext allocation before field access.

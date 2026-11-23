@@ -130,6 +130,7 @@ VkContext* createVkContext(JNIEnv* env, jobject obj, int clientFd, jobject optio
     jobjectArray exposedDeviceExtensions = getJFieldByName(env, options, "exposedDeviceExtensions", JSIGNATURE_ARRAY_STRING).l;
 
     VkContext* context = calloc(1, sizeof(VkContext));
+    if (context == NULL) return NULL;
     context->clientFd = clientFd;
     context->vkMaxVersion = getJFieldByName(env, options, "vkMaxVersion", "I").i;
     context->maxDeviceMemory = getJFieldByName(env, options, "maxDeviceMemory", "S").s;
