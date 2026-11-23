@@ -136,7 +136,6 @@ public class ShortcutSettingsDialog extends ContentDialog {
         final GpuCompatibilityProfile[] detectedGPUProfile = new GpuCompatibilityProfile[1];
         final Handler mainHandler = new Handler(context.getMainLooper());
         GpuCompatibilityProfile.detectAsync(context, profile -> mainHandler.post(() -> {
-            if (!isShowing()) return;
             detectedGPUProfile[0] = profile;
             sGameCompatibilityProfile.setEnabled(true);
             tvGameCompatibilityProfileInfo.setText(context.getString(
