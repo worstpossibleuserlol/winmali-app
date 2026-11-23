@@ -51,6 +51,7 @@ import com.winlator.core.FileUtils;
 import com.winlator.core.GeneralComponents;
 import com.winlator.core.GPUHelper;
 import com.winlator.core.GpuCompatibilityProfile;
+import com.winlator.core.GraphicsDriverInstallState;
 import com.winlator.core.KeyValueSet;
 import com.winlator.core.LocaleHelper;
 import com.winlator.core.PreloaderDialog;
