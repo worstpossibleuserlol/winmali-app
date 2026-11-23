@@ -4,10 +4,6 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-import com.winlator.R;
-import com.winlator.container.Container;
-import com.winlator.container.ContainerManager;
-import com.winlator.xenvironment.RootFS;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -59,7 +55,7 @@ public final class RuntimeCenterManager {
         File marker = getVerificationMarker(runtime);
         if (archive == null || marker == null || !archive.isFile() ||
                 archive.length() != runtime.fileSizeBytes || !marker.isFile()) return false;
-        String expectedMarker = runtime.sha256+"\\n"+runtime.fileSizeBytes+"\\n"+archive.lastModified();
+        String expectedMarker = runtime.sha256+":"+runtime.fileSizeBytes+":"+archive.lastModified();
         return expectedMarker.equals(FileUtils.readString(marker));
     }
 
