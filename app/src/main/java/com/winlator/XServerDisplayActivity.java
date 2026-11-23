@@ -52,6 +52,7 @@ import com.winlator.core.GeneralComponents;
 import com.winlator.core.GPUHelper;
 import com.winlator.core.GpuCompatibilityProfile;
 import com.winlator.core.GraphicsDriverInstallState;
+import com.winlator.core.DXWrapperInstallState;
 import com.winlator.core.KeyValueSet;
 import com.winlator.core.LocaleHelper;
 import com.winlator.core.PreloaderDialog;
@@ -544,7 +545,9 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         if (verifyUserRegistry()) containerDataChanged = true;
-        if (extractDXWrapperFiles()) containerDataChanged = true;
+        String previousDXWrapper = container.getExtra("dxwrapper");
+        if (!extractDXWrapperFiles()) return false;
+        if (!previousDXWrapper.equals(container.getExtra("dxwrapper"))) containerDataChanged = true;
 
         if (!wincomponents.equals(container.getExtra("wincomponents"))) {
             extractWinComponentFiles();
@@ -1075,82 +1078,130 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     }
 
     private boolean extractDXWrapperFiles() {
-        String cacheId = "";
+        String versionKey;
         if (dxwrapper.equals(DXWrappers.DXVK)) {
             DXVKConfigDialog.setEnvVars(this, dxwrapperConfig[0], envVars);
-            cacheId += dxwrapper+"-"+dxwrapperConfig[0].get("version", DefaultVersion.DXVK(graphicsDriver[0]));
+            versionKey = dxwrapperConfig[0].get("version", DefaultVersion.DXVK(graphicsDriver[0]));
         }
         else if (dxwrapper.equals(DXWrappers.WINED3D)) {
             WineD3DConfigDialog.setEnvVars(dxwrapperConfig[0], envVars);
-            cacheId += dxwrapper+"-"+dxwrapperConfig[0].get("version", DefaultVersion.WINED3D);
+            versionKey = dxwrapperConfig[0].get("version", DefaultVersion.WINED3D);
+        }
+        else {
+            android.util.Log.e("WinMali-D3D", "Unsupported Direct3D wrapper: "+dxwrapper);
+            return false;
         }
 
         String ddrawWrapper = dxwrapperConfig[0].get("ddrawWrapper", DXWrappers.WINED3D);
-        cacheId += "-"+DXWrappers.VKD3D+"-"+dxwrapperConfig[1].get("version", DefaultVersion.VKD3D)+"-"+ddrawWrapper;
-        boolean changed = !cacheId.equals(container.getExtra("dxwrapper"));
+        String vkd3dVersion = dxwrapperConfig[1].get("version", DefaultVersion.VKD3D);
+        String cacheId = dxwrapper+"-"+versionKey+"-"+DXWrappers.VKD3D+"-"+vkd3dVersion+"-"+ddrawWrapper;
         VKD3DConfigDialog.setEnvVars(dxwrapperConfig[1], envVars);
-
-        if (ddrawWrapper.equals(DXWrappers.CNC_DDRAW)) envVars.put("CNC_DDRAW_CONFIG_FILE", "C:\\ProgramData\\cnc-ddraw\\ddraw.ini");
-
-        if (!changed) return false;
-        container.putExtra("dxwrapper", cacheId);
+        if (ddrawWrapper.equals(DXWrappers.CNC_DDRAW)) {
+            envVars.put("CNC_DDRAW_CONFIG_FILE", "C:\\ProgramData\\cnc-ddraw\\ddraw.ini");
+        }
 
         File rootDir = rootFS.getRootDir();
         File windowsDir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows");
+        File[] requiredFiles = DXWrapperInstallState.getRequiredDllFiles(windowsDir, dxwrapper, ddrawWrapper);
+        if (requiredFiles == null || requiredFiles.length == 0) {
+            android.util.Log.e("WinMali-D3D", "Unsupported DDraw wrapper: "+ddrawWrapper);
+            return false;
+        }
 
+        if (!GraphicsDriverInstallState.needsInstall(
+                container.getExtra("dxwrapper"), cacheId, requiredFiles)) {
+            return true;
+        }
+
+        // Persist the cache key only after every selected runtime file has
+        // been extracted and validated, so partial installs retry next launch.
         if (dxwrapper.equals(DXWrappers.WINED3D)) {
-            String version = dxwrapperConfig[0].get("version", DefaultVersion.WINED3D);
-            if (version.equals(WineInfo.MAIN_WINE_VERSION)) {
-                final String[] dlls = {"d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll", "d3d10core.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll", "dxgi.dll", "ddraw.dll", "wined3d.dll"};
-                restoreBuiltinDllFiles(dlls);
+            if (versionKey.equals(WineInfo.MAIN_WINE_VERSION)) {
+                String[] builtInD3DDlls = {
+                    "d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll",
+                    "d3d10core.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll",
+                    "dxgi.dll", "wined3d.dll"
+                };
+                if (!restoreBuiltinDllFiles(builtInD3DDlls)) return false;
             }
-            else GeneralComponents.extractFile(GeneralComponents.Type.WINED3D, this, version, DefaultVersion.WINED3D);
-        }
-        else if (dxwrapper.equals(DXWrappers.DXVK)) {
-            final boolean[] hasD3D8DllFile = {false};
-            final boolean[] hasD3D10DllFile = {false};
-
-            GeneralComponents.extractFile(GeneralComponents.Type.DXVK, this, dxwrapperConfig[0].get("version"), DefaultVersion.DXVK(graphicsDriver[0]), (destination, size) -> {
-                String name = destination.getName();
-                if (name.equals("d3d10.dll")) {
-                    hasD3D10DllFile[0] = true;
-                }
-                else if (name.equals("d3d8.dll")) {
-                    hasD3D8DllFile[0] = true;
-                }
-                return destination;
-            });
-
-            if (!hasD3D8DllFile[0]) {
-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "dxwrapper/d8vk-"+DefaultVersion.D8VK+".tzst", windowsDir);
+            else if (GeneralComponents.extractFileResolvedVersion(
+                    GeneralComponents.Type.WINED3D, this, versionKey, DefaultVersion.WINED3D, null) == null) {
+                android.util.Log.e("WinMali-D3D", "Unable to extract the selected WineD3D version");
+                return false;
             }
-            if (!hasD3D10DllFile[0]) restoreBuiltinDllFiles("d3d10.dll", "d3d10_1.dll");
+        }
+        else {
+            final boolean[] hasD3D8 = {false};
+            final boolean[] hasD3D10 = {false};
+            final boolean[] hasD3D10_1 = {false};
+            if (GeneralComponents.extractFileResolvedVersion(
+                    GeneralComponents.Type.DXVK, this, versionKey, DefaultVersion.DXVK(graphicsDriver[0]),
+                    (destination, size) -> {
+                        String name = destination.getName();
+                        if (name.equals("d3d8.dll")) hasD3D8[0] = true;
+                        else if (name.equals("d3d10.dll")) hasD3D10[0] = true;
+                        else if (name.equals("d3d10_1.dll")) hasD3D10_1[0] = true;
+                        return destination;
+                    }) == null) {
+                android.util.Log.e("WinMali-D3D", "Unable to extract the selected DXVK version");
+                return false;
+            }
+
+            if (!hasD3D8[0] && !TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD,
+                    this, "dxwrapper/d8vk-"+DefaultVersion.D8VK+".tzst", windowsDir)) {
+                android.util.Log.e("WinMali-D3D", "Unable to install the D8VK fallback");
+                return false;
+            }
+            if (!hasD3D10[0] && !restoreBuiltinDllFiles("d3d10.dll")) return false;
+            if (!hasD3D10_1[0] && !restoreBuiltinDllFiles("d3d10_1.dll")) return false;
         }
 
-        GeneralComponents.extractFile(GeneralComponents.Type.VKD3D, this, dxwrapperConfig[1].get("version"), DefaultVersion.VKD3D);
+        if (GeneralComponents.extractFileResolvedVersion(
+                GeneralComponents.Type.VKD3D, this, vkd3dVersion, DefaultVersion.VKD3D, null) == null) {
+            android.util.Log.e("WinMali-D3D", "Unable to extract the selected VKD3D version");
+            return false;
+        }
 
-        File containerSysWoW64Dir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows/syswow64");
-        FileUtils.delete(new File(containerSysWoW64Dir, "ddraw_.dll"));
+        File syswow64 = new File(windowsDir, "syswow64");
+        File ddrawBackup = new File(syswow64, "ddraw_.dll");
+        if (ddrawBackup.exists() && !FileUtils.delete(ddrawBackup)) return false;
 
         switch (ddrawWrapper) {
-            case DXWrappers.CNC_DDRAW:
-                final String assetDir = "dxwrapper/cnc-ddraw-"+DefaultVersion.CNC_DDRAW;
-                File configFile = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/ProgramData/cnc-ddraw/ddraw.ini");
-                if (!configFile.isFile()) FileUtils.copy(this, assetDir+"/ddraw.ini", configFile);
-                File shadersDir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/ProgramData/cnc-ddraw/Shaders");
-                FileUtils.delete(shadersDir);
-                FileUtils.copy(this, assetDir+"/Shaders", shadersDir);
-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, assetDir+"/ddraw.tzst", windowsDir);
+            case DXWrappers.CNC_DDRAW: {
+                if (!restoreBuiltinDllFiles("ddraw.dll")) return false;
+                String assetDir = "dxwrapper/cnc-ddraw-"+DefaultVersion.CNC_DDRAW;
+                File driveC = windowsDir.getParentFile();
+                File programData = new File(driveC, "ProgramData/cnc-ddraw");
+                if (!FileUtils.copy(this, assetDir+"/ddraw.ini", new File(programData, "ddraw.ini"))) return false;
+                File shadersDir = new File(programData, "Shaders");
+                if (shadersDir.exists() && !FileUtils.delete(shadersDir)) return false;
+                if (!FileUtils.copy(this, assetDir+"/Shaders", shadersDir)) return false;
+                if (!TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD,
+                    this, assetDir+"/ddraw.tzst", windowsDir)) return false;
                 break;
-            case DXWrappers.D7VK:
-                restoreBuiltinDllFiles("ddraw.dll");
-                (new File(containerSysWoW64Dir, "ddraw.dll")).renameTo(new File(containerSysWoW64Dir, "ddraw_.dll"));
-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "dxwrapper/d7vk-"+DefaultVersion.D7VK+".tzst", windowsDir);
+            }
+            case DXWrappers.D7VK: {
+                if (!restoreBuiltinDllFiles("ddraw.dll")) return false;
+                File originalDdraw = new File(syswow64, "ddraw.dll");
+                if (!originalDdraw.isFile() || !originalDdraw.renameTo(ddrawBackup)) {
+                    android.util.Log.e("WinMali-D3D", "Unable to preserve the original 32-bit DDraw DLL");
+                    return false;
+                }
+                if (!TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD,
+                    this, "dxwrapper/d7vk-"+DefaultVersion.D7VK+".tzst", windowsDir)) return false;
                 break;
+            }
             default:
-                restoreBuiltinDllFiles("ddraw.dll");
+                if (!restoreBuiltinDllFiles("ddraw.dll")) return false;
                 break;
         }
+
+        if (GraphicsDriverInstallState.needsInstall(cacheId, cacheId, requiredFiles)) {
+            android.util.Log.e("WinMali-D3D", "Direct3D installation incomplete; cache key not updated");
+            return false;
+        }
+        container.putExtra("dxwrapper", cacheId);
+        android.util.Log.i("WinMali-D3D", "Verified wrapper install: "+cacheId);
         return true;
     }
 
@@ -1199,18 +1250,27 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         catch (JSONException e) {}
     }
 
-    private void restoreBuiltinDllFiles(final String... dlls) {
+    private boolean restoreBuiltinDllFiles(final String... dlls) {
         File rootDir = rootFS.getRootDir();
         File wineDir = new File(rootDir, rootFS.getWinePath());
-        File wineSystem32Dir = new File(wineDir, "/lib/wine/x86_64-windows");
-        File wineSysWoW64Dir = new File(wineDir, "/lib/wine/i386-windows");
+        File wineSystem32Dir = new File(wineDir, "lib/wine/x86_64-windows");
+        File wineSysWoW64Dir = new File(wineDir, "lib/wine/i386-windows");
         File containerSystem32Dir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows/system32");
-        File containerSysWoW64Dir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows/syswow64");;
+        File containerSysWoW64Dir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows/syswow64");
 
         for (String dll : dlls) {
-            FileUtils.copy(new File(wineSysWoW64Dir, dll), new File(containerSysWoW64Dir, dll));
-            FileUtils.copy(new File(wineSystem32Dir, dll), new File(containerSystem32Dir, dll));
+            File source32 = new File(wineSysWoW64Dir, dll);
+            File source64 = new File(wineSystem32Dir, dll);
+            File destination32 = new File(containerSysWoW64Dir, dll);
+            File destination64 = new File(containerSystem32Dir, dll);
+            if (!FileUtils.copy(source32, destination32) ||
+                !FileUtils.copy(source64, destination64) ||
+                !isNonEmptyFile(destination32) || !isNonEmptyFile(destination64)) {
+                android.util.Log.e("WinMali-D3D", "Failed to restore "+dll+" for both architectures");
+                return false;
+            }
         }
+        return true;
     }
 
     private boolean isGenerateWineprefix() {
