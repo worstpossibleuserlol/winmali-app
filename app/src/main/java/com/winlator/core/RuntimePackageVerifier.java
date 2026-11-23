@@ -5,10 +5,17 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Streaming integrity checks for Runtime Center download archives. */
 public final class RuntimePackageVerifier {
     private static final int BUFFER_SIZE = 64 * 1024;
+    private static final ExecutorService VERIFICATION_OPERATIONS = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "WinMali-runtime-verification");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private RuntimePackageVerifier() {}
 
@@ -23,6 +30,24 @@ public final class RuntimePackageVerifier {
         catch (IOException | NoSuchAlgorithmException | IllegalArgumentException error) {
             return false;
         }
+    }
+
+    /**
+     * Performs the potentially expensive archive digest away from the caller thread.
+     * The callback is invoked on the verification worker thread.
+     */
+    public static void verifyAsync(File file, long expectedSize, String expectedSha256,
+            Callback<Boolean> callback) {
+        if (callback == null) return;
+        VERIFICATION_OPERATIONS.execute(() -> {
+            boolean verified = verify(file, expectedSize, expectedSha256);
+            try {
+                callback.call(verified);
+            }
+            catch (RuntimeException error) {
+                android.util.Log.w("WinMali-Runtime", "Runtime verification callback failed", error);
+            }
+        });
     }
 
     public static String sha256(File file) {
