@@ -222,7 +222,15 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                 screenInfo = resolveScreenInfo(shortcut.getExtra("screenSize", container.getScreenSize()));
 
                 String dinputMapperType = shortcut.getExtra("dinputMapperType");
-                if (!dinputMapperType.isEmpty()) winHandler.gamepadHandler.setDInputMapperType(Byte.parseByte(dinputMapperType));
+                if (!dinputMapperType.isEmpty()) {
+                    try {
+                        winHandler.gamepadHandler.setDInputMapperType(Byte.parseByte(dinputMapperType));
+                    }
+                    catch (NumberFormatException error) {
+                        android.util.Log.w("WinMali-Input",
+                            "Ignoring an invalid per-shortcut DirectInput mapper value", error);
+                    }
+                }
 
                 win32AppWorkarounds.applyStartupWorkarounds(!shortcut.wmClass.isEmpty() ? shortcut.wmClass : shortcut.path);
             }
