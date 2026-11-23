@@ -495,8 +495,17 @@ public class SettingsFragment extends Fragment {
         scrollView.setBackgroundColor(dialogBackgroundColor);
         scrollView.addView(runtimeList);
 
+        TextView dialogTitleView = new TextView(context);
+        dialogTitleView.setText(R.string.compatibility_runtime_bundle);
+        dialogTitleView.setTextColor(Color.WHITE);
+        dialogTitleView.setTextSize(20);
+        dialogTitleView.setTypeface(dialogTitleView.getTypeface(), android.graphics.Typeface.BOLD);
+        int titlePadding = (int)(20 * context.getResources().getDisplayMetrics().density);
+        dialogTitleView.setPadding(titlePadding, titlePadding, titlePadding, titlePadding);
+        dialogTitleView.setBackgroundColor(dialogBackgroundColor);
+
         final AlertDialog dialog = new AlertDialog.Builder(context)
-            .setTitle(R.string.compatibility_runtime_bundle)
+            .setCustomTitle(dialogTitleView)
             .setView(scrollView)
             .setNegativeButton(android.R.string.ok, null)
             .create();
@@ -658,8 +667,6 @@ public class SettingsFragment extends Fragment {
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new ColorDrawable(dialogBackgroundColor));
         }
-        TextView dialogTitle = dialog.findViewById(android.R.id.alertTitle);
-        if (dialogTitle != null) dialogTitle.setTextColor(Color.WHITE);
         Button okButton = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
         if (okButton != null) styleRuntimeCenterButton(okButton, buttonBackgroundColor);
     }
