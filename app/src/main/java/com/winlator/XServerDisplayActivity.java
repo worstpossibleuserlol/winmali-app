@@ -140,6 +140,8 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     private Win32AppWorkarounds win32AppWorkarounds;
     private String screenEffectProfile;
     private final java.util.concurrent.atomic.AtomicBoolean exitRequested = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private boolean automaticGpuSettingsEnabled;
+    private GpuCompatibilityProfile.Vendor activeGpuVendor = GpuCompatibilityProfile.Vendor.UNKNOWN;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -481,6 +483,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         String savedAutoSetting = container.getExtra("autoGpuSettings");
         boolean automaticSettings = "t".equals(savedAutoSetting) ||
             (savedAutoSetting.isEmpty() && preferences.getBoolean("auto_gpu_settings", true));
+        automaticGpuSettingsEnabled = automaticSettings;
         if (!automaticSettings) return;
 
         String renderer = "";
@@ -493,9 +496,11 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             android.util.Log.w("WinMali-GPU", "Unable to identify the GPU for launch compatibility", error);
         }
 
-        GpuCompatibilityProfile.Vendor vendor =
+        activeGpuVendor =
             GpuCompatibilityProfile.resolve(renderer, vendorName, 0, null).vendor;
-        if (vendor != GpuCompatibilityProfile.Vendor.MALI) return;
+        android.util.Log.i("WinMali-GPU", "Detected renderer=" + renderer +
+            ", vendor=" + vendorName + ", compatibility profile=" + activeGpuVendor);
+        if (activeGpuVendor != GpuCompatibilityProfile.Vendor.MALI) return;
 
         String safeDXWrapper = GpuCompatibilityProfile.resolveDXWrapperForLaunch(
             dxwrapper, vendor, true);
@@ -687,6 +692,9 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
 
             envVars.putAll(container.getEnvVars());
             if (shortcut != null) envVars.putAll(shortcut.getExtra("envVars"));
+            if (automaticGpuSettingsEnabled) {
+                GpuCompatibilityProfile.applyMaliEnvironmentDefaults(envVars, activeGpuVendor);
+            }
             if (!envVars.has("WINEESYNC")) envVars.put("WINEESYNC", "1");
 
             guestProgramLauncherComponent.setBox64Preset(shortcut != null ? shortcut.getExtra("box64Preset", container.getBox64Preset()) : container.getBox64Preset());

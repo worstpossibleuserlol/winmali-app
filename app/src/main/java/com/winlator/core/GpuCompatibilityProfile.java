@@ -154,21 +154,41 @@ public final class GpuCompatibilityProfile {
     }
 
     /**
-     * Applies the Mali-safe WineD3D path only when the user has not stored an
-     * explicit renderer/offscreen choice. Vortek provides the Vulkan path on
-     * Mali devices, while Backbuffer avoids the FBO path that can show black
-     * output on some mobile GPU/driver combinations.
+     * Applies Mali-safe WineD3D defaults. The container UI writes "gl" and
+     * "fbo" even when the user simply accepts its default values, so those
+     * two values are treated as inherited defaults while automatic GPU
+     * compatibility is enabled. Non-default renderer choices are preserved.
      */
     public static KeyValueSet applyMaliWineD3DDefaults(KeyValueSet config, Vendor vendor) {
         KeyValueSet resolved = config != null ? config : new KeyValueSet();
         if (vendor != Vendor.MALI) return resolved;
 
-        if (resolved.get("renderer", "").trim().isEmpty()) {
+        String renderer = resolved.get("renderer", "").trim();
+        if (renderer.isEmpty() || renderer.equalsIgnoreCase("gl")) {
             resolved.put("renderer", "vulkan");
         }
-        if (resolved.get("OffscreenRenderingMode", "").trim().isEmpty()) {
+
+        String offscreenMode = resolved.get("OffscreenRenderingMode", "").trim();
+        if (offscreenMode.isEmpty() || offscreenMode.equalsIgnoreCase("fbo")) {
             resolved.put("OffscreenRenderingMode", "backbuffer");
         }
+        return resolved;
+    }
+
+    /**
+     * Applies conservative Box64/Mesa defaults recommended by Mali Winlator
+     * configurations, without replacing explicitly supplied non-default values.
+     */
+    public static EnvVars applyMaliEnvironmentDefaults(EnvVars envVars, Vendor vendor) {
+        EnvVars resolved = envVars != null ? envVars : new EnvVars();
+        if (vendor != Vendor.MALI) return resolved;
+
+        String glThread = resolved.get("mesa_glthread");
+        if (glThread.isEmpty() || glThread.equalsIgnoreCase("true") || glThread.equals("1")) {
+            resolved.put("mesa_glthread", "0");
+        }
+        if (!resolved.has("BOX64_MMAP32")) resolved.put("BOX64_MMAP32", "1");
+        if (!resolved.has("BOX64_SAFEFLAGS")) resolved.put("BOX64_SAFEFLAGS", "2");
         return resolved;
     }
 
