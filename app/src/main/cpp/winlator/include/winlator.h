@@ -16,7 +16,7 @@
 
 #define CLOSEFD(x) \
     do { \
-        if (x > 0) { \
+        if (x >= 0) { \
             close(x); \
             x = -1; \
         } \

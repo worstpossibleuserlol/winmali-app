@@ -23,3 +23,5 @@ Task 5: hardened low-memory swapchain creation — check swapchain/image/command
 Task 6: command-buffer allocation failure now frees its host-side handle array and clears the pointer before swapchain teardown, so cleanup cannot pass zero/uninitialized handles to Vulkan.
 
 Task 7: hardened Vortek resource-memory allocation against calloc/AHardwareBuffer allocation failure, added the explicit AUTO enum case, accepted valid descriptor 0, and duplicated the borrowed AHardwareBuffer native-handle FD before storing/closing it. Fixed the missing stdlib declaration include for strtod in the native utility header.
+
+Task 8: fixed the shared CLOSEFD macro to close any valid descriptor (>= 0), including descriptor 0. The new resource-memory paths rely on the standard -1 invalid-FD sentinel, so zero must remain a closable/valid descriptor.

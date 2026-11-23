@@ -1,6 +1,7 @@
-#include <stdlib.h>
 #ifndef WINLATOR_STRING_UTILS_H
 #define WINLATOR_STRING_UTILS_H
+
+#include <stdlib.h>
 
 #include <ctype.h>
 #include <stdarg.h>
