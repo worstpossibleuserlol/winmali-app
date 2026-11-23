@@ -282,8 +282,8 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                 applyAutomaticGpuCompatibilityFallback();
                 systemFilesReady = setupWineSystemFiles();
                 if (systemFilesReady) {
-                    extractGraphicsDriverFiles();
-                    changeWineAudioDriver();
+                    systemFilesReady = extractGraphicsDriverFiles();
+                    if (systemFilesReady) changeWineAudioDriver();
                 }
             }
 
@@ -916,7 +916,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         xServerView.getRenderer().setCursorVisible(profile == null || profile.isCursorVisible());
     }
 
-    private void extractGraphicsDriverFiles() {
+    private boolean extractGraphicsDriverFiles() {
         envVars.put("vblank_mode", "0");
 
         String cacheId = "";
@@ -930,29 +930,47 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         boolean changed = !cacheId.equals(currentGraphicsDriver);
         File rootDir = rootFS.getRootDir();
         File libDir = rootFS.getLibDir();
+        File vulkanICDDir = new File(rootDir, "usr/share/vulkan/icd.d");
+        File[] requiredFiles = getRequiredGraphicsDriverFiles(rootDir, libDir);
+        if (requiredFiles == null || requiredFiles.length == 0) {
+            android.util.Log.e("WinMali-GPU", "Unsupported graphics-driver selection: "+
+                graphicsDriver[0]+","+graphicsDriver[1]);
+            return false;
+        }
+
+        boolean needsInstall = GraphicsDriverInstallState.needsInstall(
+            currentGraphicsDriver, cacheId, requiredFiles);
+        boolean shouldExtract = needsInstall || MainActivity.DEBUG_MODE;
 
         if (changed) {
             FileUtils.delete(new File(libDir, "libvulkan_freedreno.so"));
             FileUtils.delete(new File(libDir, "libvulkan_vortek.so"));
             FileUtils.delete(new File(libDir, "libGL.so.1.7.0"));
-
-            File vulkanICDDir = new File(rootDir, "/usr/share/vulkan/icd.d");
             FileUtils.delete(vulkanICDDir);
-            vulkanICDDir.mkdirs();
-
-            preferences.edit().putString("current_graphics_driver", cacheId).apply();
+            if (!vulkanICDDir.isDirectory() && !vulkanICDDir.mkdirs()) {
+                android.util.Log.e("WinMali-GPU", "Unable to create Vulkan ICD directory");
+                return false;
+            }
         }
 
         if (graphicsDriver[0].equals(GraphicsDrivers.TURNIP)) {
             TurnipConfigDialog.setEnvVars(this, graphicsDriverConfig[0], envVars);
-
-            if (changed) {
+            if (shouldExtract) {
                 String version = graphicsDriverConfig[0].get("version", DefaultVersion.TURNIP);
-                GeneralComponents.extractFile(GeneralComponents.Type.TURNIP, this, version, DefaultVersion.TURNIP);
+                String installedVersion = GeneralComponents.extractFileResolvedVersion(
+                    GeneralComponents.Type.TURNIP, this, version, DefaultVersion.TURNIP, null);
+                if (installedVersion == null) {
+                    android.util.Log.e("WinMali-GPU", "Unable to install the selected Turnip driver");
+                    return false;
+                }
             }
         }
-        else if (graphicsDriver[0].equals(GraphicsDrivers.VORTEK) && (changed || MainActivity.DEBUG_MODE)) {
-            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/vortek-" + DefaultVersion.VORTEK + ".tzst", rootDir);
+        else if (graphicsDriver[0].equals(GraphicsDrivers.VORTEK) && shouldExtract) {
+            if (!TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
+                "graphics_driver/vortek-" + DefaultVersion.VORTEK + ".tzst", rootDir)) {
+                android.util.Log.e("WinMali-GPU", "Unable to install the Vortek Vulkan driver");
+                return false;
+            }
         }
 
         switch (graphicsDriver[1]) {
@@ -961,7 +979,11 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                 envVars.put("ZINK_CONTEXT_THREADED", "1");
                 if (graphicsDriver[0].equals(GraphicsDrivers.VORTEK)) envVars.put("MESA_GL_VERSION_OVERRIDE", "3.3");
 
-                if (changed) TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/zink-"+DefaultVersion.ZINK+".tzst", rootDir);
+                if (shouldExtract && !TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD,
+                    this, "graphics_driver/zink-"+DefaultVersion.ZINK+".tzst", rootDir)) {
+                    android.util.Log.e("WinMali-GPU", "Unable to install the Zink OpenGL driver");
+                    return false;
+                }
                 break;
             case GraphicsDrivers.VIRGL:
                 envVars.put("GALLIUM_DRIVER", "virpipe");
@@ -969,14 +991,63 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                 envVars.put("VIRGL_SERVER_PATH", rootDir+UnixSocketConfig.VIRGL_SERVER_PATH);
                 VirGLConfigDialog.setEnvVars(graphicsDriverConfig[1], envVars);
 
-                if (changed) TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/virgl-"+DefaultVersion.VIRGL+".tzst", rootDir);
+                if (shouldExtract && !TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD,
+                    this, "graphics_driver/virgl-"+DefaultVersion.VIRGL+".tzst", rootDir)) {
+                    android.util.Log.e("WinMali-GPU", "Unable to install the VirGL OpenGL driver");
+                    return false;
+                }
                 break;
             case GraphicsDrivers.GLADIO:
                 envVars.put("GLADIO_NO_ERROR", "1");
 
-                if (changed || MainActivity.DEBUG_MODE) TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/gladio-"+DefaultVersion.GLADIO+".tzst", rootDir);
+                if (shouldExtract && !TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD,
+                    this, "graphics_driver/gladio-"+DefaultVersion.GLADIO+".tzst", rootDir)) {
+                    android.util.Log.e("WinMali-GPU", "Unable to install the Gladio OpenGL driver");
+                    return false;
+                }
                 break;
+            default:
+                android.util.Log.e("WinMali-GPU", "Unsupported OpenGL driver: "+graphicsDriver[1]);
+                return false;
         }
+
+        if (GraphicsDriverInstallState.needsInstall(cacheId, cacheId, requiredFiles)) {
+            android.util.Log.e("WinMali-GPU", "Graphics-driver files are still missing after extraction");
+            return false;
+        }
+
+        // Persist the installed-driver cache key only after every required file
+        // has been extracted and validated. A failed or interrupted extraction
+        // therefore retries on the next container launch.
+        preferences.edit().putString("current_graphics_driver", cacheId).apply();
+        return true;
+    }
+
+    private File[] getRequiredGraphicsDriverFiles(File rootDir, File libDir) {
+        ArrayList<File> requiredFiles = new ArrayList<>();
+        switch (graphicsDriver[0]) {
+            case GraphicsDrivers.VORTEK:
+                requiredFiles.add(new File(libDir, "libvulkan_vortek.so"));
+                requiredFiles.add(new File(rootDir, "usr/share/vulkan/icd.d/vortek_icd.aarch64.json"));
+                break;
+            case GraphicsDrivers.TURNIP:
+                requiredFiles.add(new File(libDir, "libvulkan_freedreno.so"));
+                requiredFiles.add(new File(rootDir, "usr/share/vulkan/icd.d/freedreno_icd.aarch64.json"));
+                break;
+            default:
+                return null;
+        }
+
+        switch (graphicsDriver[1]) {
+            case GraphicsDrivers.ZINK:
+            case GraphicsDrivers.VIRGL:
+            case GraphicsDrivers.GLADIO:
+                requiredFiles.add(new File(libDir, "libGL.so.1.7.0"));
+                break;
+            default:
+                return null;
+        }
+        return requiredFiles.toArray(new File[0]);
     }
 
     private void showTouchpadHelpDialog() {
