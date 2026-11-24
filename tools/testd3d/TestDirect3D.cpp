@@ -127,15 +127,15 @@ void renderFrame() {
     const float radius = std::max(24.0f, std::min(width, height) * 0.27f);
     const float cx = width * 0.5f, cy = height * 0.5f;
     const float angle = static_cast<float>(GetTickCount() - g_startTick) * 0.0008f;
-    const float localX[3] = {0.0f, std::cosf(2.0943951f) * radius, std::cosf(4.1887902f) * radius};
-    const float localY[3] = {-radius, std::sinf(2.0943951f) * radius, std::sinf(4.1887902f) * radius};
+    const float localX[3] = {0.0f, std::cos(2.0943951f) * radius, std::cos(4.1887902f) * radius};
+    const float localY[3] = {-radius, std::sin(2.0943951f) * radius, std::sin(4.1887902f) * radius};
     const D3DCOLOR colors[3] = {
         D3DCOLOR_XRGB(255, 82, 82), D3DCOLOR_XRGB(82, 230, 145), D3DCOLOR_XRGB(80, 170, 255)
     };
     Vertex vertices[3] = {};
     for (int i = 0; i < 3; ++i) {
-        const float x = localX[i] * std::cosf(angle) - localY[i] * std::sinf(angle);
-        const float y = localX[i] * std::sinf(angle) + localY[i] * std::cosf(angle);
+        const float x = localX[i] * std::cos(angle) - localY[i] * std::sin(angle);
+        const float y = localX[i] * std::sin(angle) + localY[i] * std::cos(angle);
         vertices[i] = {cx + x, cy + y, 0.5f, 1.0f, colors[i]};
     }
     result = g_device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
