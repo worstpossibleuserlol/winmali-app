@@ -279,9 +279,8 @@ VerifyResult verifyBackBufferPixels() {
     }
 
     if (verification == VerifyResult::VERIFIED) {
-        ++g_verifiedFrames;
-        writeLog("Verified four colour panels on frame %llu (%u/%u successful samples).",
-            g_frames, g_verifiedFrames, kRequiredVerifiedFrames);
+        writeLog("Backbuffer pixel samples matched all four expected regions "
+            "for the frame awaiting Present (%llu).", g_frames + 1);
     }
 
     return verification;
@@ -512,10 +511,12 @@ void renderFrame() {
         g_passReported && g_frames > 0 &&
         (g_frames % kReverifyIntervalFrames) == 0;
 
+    bool framePixelsVerified = false;
     if (!g_pixelVerificationUnavailable &&
         (initialVerificationDue || periodicVerificationDue)) {
         const VerifyResult verification = verifyBackBufferPixels();
         if (verification == VerifyResult::VISUAL_FAILURE) return;
+        framePixelsVerified = verification == VerifyResult::VERIFIED;
     }
 
     result = g_device->Present(nullptr, nullptr, nullptr, nullptr);
@@ -529,6 +530,12 @@ void renderFrame() {
     }
 
     ++g_frames;
+    if (framePixelsVerified) {
+        ++g_verifiedFrames;
+        writeLog("Presented frame %llu passed all four backbuffer colour checks "
+            "(%u/%u required frames).", g_frames,
+            g_verifiedFrames, kRequiredVerifiedFrames);
+    }
 
     if (!g_passReported && g_verifiedFrames >= kRequiredVerifiedFrames) {
         g_passReported = true;
