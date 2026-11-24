@@ -51,6 +51,7 @@ import com.winlator.core.FileUtils;
 import com.winlator.core.GeneralComponents;
 import com.winlator.core.GPUHelper;
 import com.winlator.core.GpuCompatibilityProfile;
+import com.winlator.core.CompatibilityCenter;
 import com.winlator.core.GraphicsDriverInstallState;
 import com.winlator.core.DXWrapperInstallState;
 import com.winlator.core.WinComponentInstallState;
@@ -145,6 +146,8 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     private final java.util.concurrent.atomic.AtomicBoolean exitRequested = new java.util.concurrent.atomic.AtomicBoolean(false);
     private boolean automaticGpuSettingsEnabled;
     private GpuCompatibilityProfile.Vendor activeGpuVendor = GpuCompatibilityProfile.Vendor.UNKNOWN;
+    private String gameProfileBox64Preset;
+    private EnvVars gameProfileEnvVars;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -225,6 +228,17 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                 graphicsDriverConfig = shortcut.getExtra("graphicsDriverConfig", container.getGraphicsDriverConfig());
                 audioDriverConfig = new KeyValueSet(shortcut.getExtra("audioDriverConfig", container.getAudioDriverConfig()));
                 screenInfo = resolveScreenInfo(shortcut.getExtra("screenSize", container.getScreenSize()));
+
+                CompatibilityCenter.GameProfile gameProfile =
+                    CompatibilityCenter.getGameProfile(this, container, shortcut.name, shortcut.path);
+                if (gameProfile != null) {
+                    dxwrapper = gameProfile.dxWrapper;
+                    dxwrapperConfig = "";
+                    gameProfileBox64Preset = gameProfile.box64Preset;
+                    gameProfileEnvVars = new EnvVars(gameProfile.envVars);
+                    android.util.Log.i("WinMali-Compatibility",
+                        "Applied launch-only compatibility profile for " + shortcut.name);
+                }
 
                 String dinputMapperType = shortcut.getExtra("dinputMapperType");
                 if (!dinputMapperType.isEmpty()) winHandler.gamepadHandler.setDInputMapperType(Byte.parseByte(dinputMapperType));
@@ -698,12 +712,15 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
 
             envVars.putAll(container.getEnvVars());
             if (shortcut != null) envVars.putAll(shortcut.getExtra("envVars"));
+            if (gameProfileEnvVars != null) envVars.putAll(gameProfileEnvVars);
             if (automaticGpuSettingsEnabled) {
                 GpuCompatibilityProfile.applyMaliEnvironmentDefaults(envVars, activeGpuVendor);
             }
             if (!envVars.has("WINEESYNC")) envVars.put("WINEESYNC", "1");
 
-            guestProgramLauncherComponent.setBox64Preset(shortcut != null ? shortcut.getExtra("box64Preset", container.getBox64Preset()) : container.getBox64Preset());
+            guestProgramLauncherComponent.setBox64Preset(gameProfileBox64Preset != null
+                ? gameProfileBox64Preset
+                : (shortcut != null ? shortcut.getExtra("box64Preset", container.getBox64Preset()) : container.getBox64Preset()));
         }
 
         environment = new XEnvironment(this, rootFS);
