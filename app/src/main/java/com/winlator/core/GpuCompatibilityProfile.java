@@ -154,9 +154,9 @@ public final class GpuCompatibilityProfile {
     }
 
     /**
-     * Keeps Mali's automatic WineD3D renderer on the OpenGL path used by the
-     * bundled legacy Direct3D 9 test application. Explicit renderer choices
-     * remain untouched. The inherited FBO default is changed to backbuffer.
+     * Keeps Mali's automatic WineD3D renderer on the OpenGL path. Explicit
+     * renderer choices remain untouched. The legacy backbuffer option is only
+     * applied to WineD3D versions that still implement OffscreenRenderingMode.
      */
     public static KeyValueSet applyMaliWineD3DDefaults(KeyValueSet config, Vendor vendor) {
         KeyValueSet resolved = config != null ? config : new KeyValueSet();
@@ -167,11 +167,35 @@ public final class GpuCompatibilityProfile {
             resolved.put("renderer", "gl");
         }
 
-        String offscreenMode = resolved.get("OffscreenRenderingMode", "").trim();
-        if (offscreenMode.isEmpty() || offscreenMode.equalsIgnoreCase("fbo")) {
-            resolved.put("OffscreenRenderingMode", "backbuffer");
+        String version = resolved.get("version", DefaultVersion.WINED3D);
+        if (supportsLegacyOffscreenRenderingMode(version)) {
+            String offscreenMode = resolved.get("OffscreenRenderingMode", "").trim();
+            if (offscreenMode.isEmpty() || offscreenMode.equalsIgnoreCase("fbo")) {
+                resolved.put("OffscreenRenderingMode", "backbuffer");
+            }
         }
         return resolved;
+    }
+
+    /**
+     * Wine removed OffscreenRenderingMode in 9.6; 9.5 is the last upstream
+     * release whose WineD3D parser accepts it. Unknown version labels are
+     * treated conservatively as not supporting the option.
+     */
+    public static boolean supportsLegacyOffscreenRenderingMode(String wineD3DVersion) {
+        if (wineD3DVersion == null) return false;
+        Matcher matcher = Pattern.compile("^\\s*(\\d+)\\.(\\d+)(?:\\.|$|[-+])")
+            .matcher(wineD3DVersion.trim());
+        if (!matcher.find()) return false;
+
+        try {
+            int major = Integer.parseInt(matcher.group(1));
+            int minor = Integer.parseInt(matcher.group(2));
+            return major < 9 || (major == 9 && minor <= 5);
+        }
+        catch (NumberFormatException ignored) {
+            return false;
+        }
     }
 
     /**

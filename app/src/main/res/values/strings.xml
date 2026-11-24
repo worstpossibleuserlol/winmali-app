@@ -109,6 +109,7 @@
     <string name="unknown">Unknown</string>
     <string name="other">Other</string>
     <string name="offscreen_rendering_mode">Offscreen Rendering Mode</string>
+    <string name="offscreen_rendering_unsupported">This WineD3D version requires FBO rendering; the Backbuffer option is not supported.</string>
     <string name="enable_strict_shader_math">Enable Strict Shader Math</string>
     <string name="video_memory_size">Video Memory Size</string>
     <string name="none">None</string>

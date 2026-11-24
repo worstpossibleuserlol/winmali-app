@@ -530,9 +530,18 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         if (dxwrapper.equals(DXWrappers.WINED3D)) {
             dxwrapperConfig[0] = GpuCompatibilityProfile.applyMaliWineD3DDefaults(
                 dxwrapperConfig[0], activeGpuVendor);
-            android.util.Log.i("WinMali-GPU",
-                "Using Mali WineD3D renderer=" + dxwrapperConfig[0].get("renderer", "gl") +
-                ", offscreen=" + dxwrapperConfig[0].get("OffscreenRenderingMode", "fbo"));
+            String wineD3DVersion = dxwrapperConfig[0].get("version", DefaultVersion.WINED3D);
+            String wineD3DRenderer = dxwrapperConfig[0].get("renderer", "gl");
+            if (GpuCompatibilityProfile.supportsLegacyOffscreenRenderingMode(wineD3DVersion)) {
+                android.util.Log.i("WinMali-GPU", "Using Mali WineD3D renderer=" +
+                    wineD3DRenderer + ", legacy offscreen mode=" +
+                    dxwrapperConfig[0].get("OffscreenRenderingMode", "fbo"));
+            }
+            else {
+                android.util.Log.i("WinMali-GPU", "Using Mali WineD3D renderer=" +
+                    wineD3DRenderer + "; WineD3D " + wineD3DVersion +
+                    " uses FBO-only offscreen rendering");
+            }
         }
 
         String safeVulkanDriver = GpuCompatibilityProfile.resolveVulkanDriverForLaunch(

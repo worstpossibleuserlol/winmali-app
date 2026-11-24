@@ -2,9 +2,11 @@ package com.winlator.contentdialog;
 
 import android.content.Context;
 import android.view.View;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.Spinner;
+import android.widget.TextView;
 
 import com.winlator.R;
 import com.winlator.container.DXWrappers;
@@ -12,6 +14,7 @@ import com.winlator.core.AppUtils;
 import com.winlator.core.DefaultVersion;
 import com.winlator.core.EnvVars;
 import com.winlator.core.GeneralComponents;
+import com.winlator.core.GpuCompatibilityProfile;
 import com.winlator.core.KeyValueSet;
 import com.winlator.core.StringUtils;
 import com.winlator.widget.GPUCardAdapter;
@@ -48,9 +51,33 @@ public class WineD3DConfigDialog extends ContentDialog {
         sGPUName.setSelection(adapter.getPositionByDeviceId(config.getInt("VideoPciDeviceID", 1728)));
 
         List<String> offscreenRenderingModeList = Arrays.asList("Backbuffer", "FBO");
+        final TextView tvOffscreenRenderingMode = findViewById(R.id.TVOffscreenRenderingMode);
+        final TextView tvOffscreenUnavailable = findViewById(R.id.TVOffscreenUnavailable);
         final Spinner sOffscreenRenderingMode = findViewById(R.id.SOffscreenRenderingMode);
         sOffscreenRenderingMode.setAdapter(new ArrayAdapter<>(context, android.R.layout.simple_spinner_dropdown_item, offscreenRenderingModeList));
         AppUtils.setSpinnerSelectionFromValue(sOffscreenRenderingMode, config.get("OffscreenRenderingMode", "fbo"));
+
+        Runnable updateOffscreenControls = () -> {
+            Object selected = sVersion.getSelectedItem();
+            String selectedVersion = selected != null ? selected.toString() : "";
+            boolean supported = GpuCompatibilityProfile.supportsLegacyOffscreenRenderingMode(selectedVersion);
+            int settingVisibility = supported ? View.VISIBLE : View.GONE;
+            tvOffscreenRenderingMode.setVisibility(settingVisibility);
+            sOffscreenRenderingMode.setVisibility(settingVisibility);
+            tvOffscreenUnavailable.setVisibility(supported ? View.GONE : View.VISIBLE);
+        };
+        sVersion.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                updateOffscreenControls.run();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+                updateOffscreenControls.run();
+            }
+        });
+        updateOffscreenControls.run();
 
         final CheckBox cbStrictShaderMath = findViewById(R.id.CBStrictShaderMath);
         cbStrictShaderMath.setChecked(config.getInt("strict_shader_math", 1) != 0);
@@ -61,7 +88,8 @@ public class WineD3DConfigDialog extends ContentDialog {
 
         setOnConfirmCallback(() -> {
             KeyValueSet newConfig = new KeyValueSet();
-            newConfig.put("version", sVersion.getSelectedItem().toString());
+            String selectedWineD3DVersion = sVersion.getSelectedItem().toString();
+            newConfig.put("version", selectedWineD3DVersion);
             newConfig.put("csmt", cbCSMT.isChecked() ? "3" : "0");
 
             String ddrawWrapper = StringUtils.parseIdentifier(sDDrawWrapper.getSelectedItem());
@@ -73,7 +101,10 @@ public class WineD3DConfigDialog extends ContentDialog {
             GPUCardAdapter.GPUCard gpuCard = (GPUCardAdapter.GPUCard)sGPUName.getSelectedItem();
             newConfig.put("VideoPciDeviceID", String.valueOf(gpuCard.deviceId));
             newConfig.put("VideoPciVendorID", String.valueOf(gpuCard.vendorId));
-            newConfig.put("OffscreenRenderingMode", sOffscreenRenderingMode.getSelectedItem().toString().toLowerCase(Locale.ENGLISH));
+            if (GpuCompatibilityProfile.supportsLegacyOffscreenRenderingMode(selectedWineD3DVersion)) {
+                newConfig.put("OffscreenRenderingMode",
+                    sOffscreenRenderingMode.getSelectedItem().toString().toLowerCase(Locale.ENGLISH));
+            }
             newConfig.put("strict_shader_math", cbStrictShaderMath.isChecked() ? "1" : "0");
             newConfig.put("VideoMemorySize", StringUtils.parseMemorySize(sVideoMemorySize.getSelectedItem()));
 
@@ -82,14 +113,20 @@ public class WineD3DConfigDialog extends ContentDialog {
     }
 
     public static void setEnvVars(KeyValueSet config, EnvVars envVars) {
-        envVars.put("WINE_D3D_CONFIG", String.join(",",
+        List<String> options = new java.util.ArrayList<>(Arrays.asList(
             "renderer="+config.get("renderer", "gl"),
             "csmt="+config.getHexString("csmt", 3),
             "VideoPciDeviceID="+config.getHexString("VideoPciDeviceID", 1728),
             "VideoPciVendorID="+config.getHexString("VideoPciVendorID", 4318),
-            "OffscreenRenderingMode="+config.get("OffscreenRenderingMode", "fbo"),
             "strict_shader_math="+config.getHexString("strict_shader_math", 1),
             "VideoMemorySize="+config.get("VideoMemorySize", "2048")
         ));
+
+        String version = config.get("version", DefaultVersion.WINED3D);
+        if (GpuCompatibilityProfile.supportsLegacyOffscreenRenderingMode(version)) {
+            options.add("OffscreenRenderingMode="+config.get("OffscreenRenderingMode", "fbo"));
+        }
+
+        envVars.put("WINE_D3D_CONFIG", String.join(",", options));
     }
 }

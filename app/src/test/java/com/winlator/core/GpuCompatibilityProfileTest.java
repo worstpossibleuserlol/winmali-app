@@ -56,23 +56,46 @@ public class GpuCompatibilityProfileTest {
     }
 
     @Test
-    public void maliWineD3DUsesOpenGLAndBackbufferWhenNoChoiceIsSaved() {
-        KeyValueSet config = GpuCompatibilityProfile.applyMaliWineD3DDefaults(
-            new KeyValueSet(), GpuCompatibilityProfile.Vendor.MALI);
+    public void bundledWine1010MaliDefaultUsesOpenGLWithoutUnsupportedOffscreenOverride() {
+        KeyValueSet config = new KeyValueSet();
+        config.put("version", DefaultVersion.WINED3D);
+        GpuCompatibilityProfile.applyMaliWineD3DDefaults(config,
+            GpuCompatibilityProfile.Vendor.MALI);
         assertEquals("gl", config.get("renderer"));
-        assertEquals("backbuffer", config.get("OffscreenRenderingMode"));
+        assertEquals("", config.get("OffscreenRenderingMode"));
+        assertFalse(GpuCompatibilityProfile.supportsLegacyOffscreenRenderingMode(
+            DefaultVersion.WINED3D));
     }
 
     @Test
-    public void maliWineD3DKeepsStoredOpenGLAndFixesLegacyFboDefault() {
-        // The WineD3D configuration UI persists these defaults when a user
-        // opens and confirms the dialog, even without choosing them.
+    public void legacyWine95MaliDefaultUsesBackbufferWhenFboWasSelected() {
         KeyValueSet config = new KeyValueSet();
-        config.put("renderer", "gl");
+        config.put("version", "9.5");
         config.put("OffscreenRenderingMode", "fbo");
         GpuCompatibilityProfile.applyMaliWineD3DDefaults(config,
             GpuCompatibilityProfile.Vendor.MALI);
         assertEquals("gl", config.get("renderer"));
+        assertEquals("backbuffer", config.get("OffscreenRenderingMode"));
+        assertTrue(GpuCompatibilityProfile.supportsLegacyOffscreenRenderingMode("9.5"));
+    }
+
+    @Test
+    public void wine96AndNewerDoNotReceiveTheRemovedBackbufferSetting() {
+        assertFalse(GpuCompatibilityProfile.supportsLegacyOffscreenRenderingMode("9.6"));
+        assertFalse(GpuCompatibilityProfile.supportsLegacyOffscreenRenderingMode("10.10"));
+        assertFalse(GpuCompatibilityProfile.supportsLegacyOffscreenRenderingMode("11.0"));
+        assertFalse(GpuCompatibilityProfile.supportsLegacyOffscreenRenderingMode("unknown"));
+    }
+
+    @Test
+    public void legacyOffscreenModeChoiceIsPreservedForSupportedWine() {
+        KeyValueSet config = new KeyValueSet();
+        config.put("version", "9.5");
+        config.put("renderer", "gdi");
+        config.put("OffscreenRenderingMode", "backbuffer");
+        GpuCompatibilityProfile.applyMaliWineD3DDefaults(config,
+            GpuCompatibilityProfile.Vendor.MALI);
+        assertEquals("gdi", config.get("renderer"));
         assertEquals("backbuffer", config.get("OffscreenRenderingMode"));
     }
 
