@@ -39,7 +39,7 @@
             },
             {
                 "name" : "Test Direct3D",
-                "path" : "Z:/opt/apps/TestD3D.exe"
+                "path" : "Z:/opt/apps/WinMaliD3DTest.exe"
             },
             {
                 "name" : "Computer",

@@ -597,7 +597,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         if (containerDataChanged) container.saveData();
-        return ensureFileManagerInstalled();
+        return ensureFileManagerInstalled() && ensureDirect3DTestInstalled();
     }
 
     /**
@@ -686,6 +686,31 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
 
     private static boolean isNonEmptyFile(File file) {
         return file.isFile() && file.length() > 0;
+    }
+
+    /**
+     * Installs the source-built Direct3D 9 diagnostic into the shared rootfs
+     * on each container start. This updates existing containers without
+     * rebuilding their Wine prefixes or overwriting saved game data.
+     */
+    private boolean ensureDirect3DTestInstalled() {
+        File appsDir = new File(rootFS.getRootDir(), "opt/apps");
+        if (FileUtils.isSymlink(appsDir) ||
+            (!appsDir.isDirectory() && !appsDir.mkdirs())) {
+            android.util.Log.e("WinMali-D3D", "Unable to prepare the shared Direct3D test directory");
+            return false;
+        }
+
+        File testExecutable = new File(appsDir, "WinMaliD3DTest.exe");
+        if (!FileUtils.copy(this, "testd3d/WinMaliD3DTest.exe", testExecutable) ||
+            !isNonEmptyFile(testExecutable)) {
+            android.util.Log.e("WinMali-D3D", "Unable to install the bundled Direct3D 9 test executable");
+            return false;
+        }
+
+        android.util.Log.i("WinMali-D3D", "Installed source-built Direct3D 9 diagnostic (" +
+            testExecutable.length() + " bytes)");
+        return true;
     }
 
     private void setupXEnvironment() {

@@ -68,6 +68,9 @@ jobs:
             "ndk;24.0.8215888" \
             "cmake;3.22.1"
 
+      - name: Install MinGW i686 cross-compiler
+        run: sudo apt-get update && sudo apt-get install -y g++-mingw-w64-i686
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
