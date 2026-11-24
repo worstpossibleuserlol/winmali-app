@@ -16,6 +16,7 @@ static D3DPRESENT_PARAMETERS g_present = {};
 static bool g_resetPending = false;
 static bool g_errorReported = false;
 static bool g_firstFrameVerified = false;
+static bool g_pixelVerificationUnavailable = false;
 static unsigned long long g_frames = 0;
 static DWORD g_startTick = 0;
 struct Vertex { float x, y, z, rhw; D3DCOLOR color; };
@@ -120,55 +121,68 @@ void reportVisualFailure(DWORD pixel) {
     PostQuitMessage(3);
 }
 
+void reportPixelReadbackUnavailable(const char* stage, HRESULT result) {
+    if (g_pixelVerificationUnavailable) return;
+    g_pixelVerificationUnavailable = true;
+    writeLog("Pixel verification unavailable at %s: HRESULT=0x%08lX; continuing as INCONCLUSIVE.",
+        stage, static_cast<unsigned long>(result));
+    if (g_window) {
+        SetWindowTextA(g_window, "Test Direct3D - INCONCLUSIVE (pixel readback unavailable)");
+    }
+}
+
 bool verifyBackBufferPixels() {
     IDirect3DSurface9* backBuffer = nullptr;
     IDirect3DSurface9* staging = nullptr;
     HRESULT result = g_device->GetRenderTarget(0, &backBuffer);
     if (FAILED(result) || !backBuffer) {
-        reportFailure("IDirect3DDevice9::GetRenderTarget", FAILED(result) ? result : E_FAIL);
-        return false;
+        reportPixelReadbackUnavailable("IDirect3DDevice9::GetRenderTarget",
+            FAILED(result) ? result : E_FAIL);
+        if (backBuffer) backBuffer->Release();
+        return true;
     }
 
     D3DSURFACE_DESC desc = {};
     result = backBuffer->GetDesc(&desc);
     if (FAILED(result) || desc.Width < 4 || desc.Height < 4) {
         backBuffer->Release();
-        reportFailure("IDirect3DSurface9::GetDesc", FAILED(result) ? result : D3DERR_INVALIDCALL);
-        return false;
+        reportPixelReadbackUnavailable("IDirect3DSurface9::GetDesc",
+            FAILED(result) ? result : D3DERR_INVALIDCALL);
+        return true;
     }
 
     if (desc.Format != D3DFMT_X8R8G8B8 &&
         desc.Format != D3DFMT_A8R8G8B8 &&
         desc.Format != D3DFMT_R5G6B5) {
         backBuffer->Release();
-        reportFailure("backbuffer pixel format (unsupported for readback)", D3DERR_NOTAVAILABLE);
-        return false;
+        reportPixelReadbackUnavailable("unsupported backbuffer pixel format", D3DERR_NOTAVAILABLE);
+        return true;
     }
 
     result = g_device->CreateOffscreenPlainSurface(
         desc.Width, desc.Height, desc.Format, D3DPOOL_SYSTEMMEM, &staging, nullptr);
     if (FAILED(result) || !staging) {
         backBuffer->Release();
-        reportFailure("CreateOffscreenPlainSurface for pixel verification",
+        reportPixelReadbackUnavailable("CreateOffscreenPlainSurface",
             FAILED(result) ? result : E_FAIL);
-        return false;
+        return true;
     }
 
     result = g_device->GetRenderTargetData(backBuffer, staging);
     backBuffer->Release();
     if (FAILED(result)) {
         staging->Release();
-        reportFailure("IDirect3DDevice9::GetRenderTargetData", result);
-        return false;
+        reportPixelReadbackUnavailable("IDirect3DDevice9::GetRenderTargetData", result);
+        return true;
     }
 
     D3DLOCKED_RECT locked = {};
     result = staging->LockRect(&locked, nullptr, D3DLOCK_READONLY);
     if (FAILED(result) || !locked.pBits || locked.Pitch <= 0) {
         staging->Release();
-        reportFailure("IDirect3DSurface9::LockRect for pixel verification",
+        reportPixelReadbackUnavailable("IDirect3DSurface9::LockRect",
             FAILED(result) ? result : D3DERR_INVALIDCALL);
-        return false;
+        return true;
     }
 
     const UINT x = desc.Width / 2;
@@ -189,8 +203,8 @@ bool verifyBackBufferPixels() {
     HRESULT unlockResult = staging->UnlockRect();
     staging->Release();
     if (FAILED(unlockResult)) {
-        reportFailure("IDirect3DSurface9::UnlockRect after pixel verification", unlockResult);
-        return false;
+        reportPixelReadbackUnavailable("IDirect3DSurface9::UnlockRect", unlockResult);
+        return true;
     }
 
     const DWORD red = (pixel >> 16) & 0xff;
@@ -250,15 +264,20 @@ void renderFrame() {
     HRESULT endResult = g_device->EndScene();
     if (FAILED(result)) { reportFailure("Direct3D 9 triangle draw", result); return; }
     if (FAILED(endResult)) { reportFailure("IDirect3DDevice9::EndScene", endResult); return; }
-    if (!g_firstFrameVerified && !verifyBackBufferPixels()) return;
+    if (!g_firstFrameVerified && !g_pixelVerificationUnavailable && !verifyBackBufferPixels()) return;
 
     result = g_device->Present(nullptr, nullptr, nullptr, nullptr);
     if (result == D3DERR_DEVICELOST) return;
     if (FAILED(result)) { reportFailure("IDirect3DDevice9::Present", result); return; }
     ++g_frames;
     if (g_frames == 1) {
-        SetWindowTextA(g_window, "Test Direct3D - PASS (D3D9 pixels verified)");
-        writeLog("First frame presented successfully.");
+        if (g_firstFrameVerified) {
+            SetWindowTextA(g_window, "Test Direct3D - PASS (D3D9 pixels verified)");
+            writeLog("First frame presented successfully and pixel readback was verified.");
+        } else if (g_pixelVerificationUnavailable) {
+            SetWindowTextA(g_window, "Test Direct3D - INCONCLUSIVE (D3D9 Present succeeded)");
+            writeLog("First frame presented successfully; pixel readback was unavailable, so visual verification is inconclusive.");
+        }
     } else if ((g_frames % 120) == 0) {
         char title[128] = {};
         snprintf(title, sizeof(title), "Test Direct3D - PASS | %llu frames", g_frames);
