@@ -121,6 +121,10 @@ void reportVisualFailure(const char* sampleName, DWORD pixel) {
 void reportPixelReadbackUnavailable(const char* stage, HRESULT result) {
     if (g_pixelVerificationUnavailable) return;
     g_pixelVerificationUnavailable = true;
+    // A previous PASS only covered earlier frames. Once readback stops working,
+    // it must not remain eligible for PASS after this diagnostic becomes
+    // INCONCLUSIVE (especially when a periodic post-PASS check fails).
+    g_verifiedFrames = 0;
     g_passReported = false;
 
     writeLog("INCONCLUSIVE: pixel readback unavailable at %s; "
