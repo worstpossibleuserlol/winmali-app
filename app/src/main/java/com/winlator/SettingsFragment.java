@@ -3,6 +3,9 @@ package com.winlator;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.res.ColorStateList;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.media.midi.MidiDeviceInfo;
@@ -15,12 +18,15 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
+import android.widget.Button;
+import android.widget.ScrollView;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.RadioGroup;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
@@ -47,7 +53,9 @@ import com.winlator.contentdialog.SoundFontTestDialog;
 import com.winlator.core.AppUtils;
 import com.winlator.core.ArrayUtils;
 import com.winlator.core.Callback;
-import com.winlator.core.CompatibilityRuntimeCatalog;
+import com.winlator.core.CompatibilityCenter;
+import com.winlator.core.RuntimeCenterCatalog;
+import com.winlator.core.RuntimeCenterManager;
 import com.winlator.core.DefaultVersion;
 import com.winlator.core.FileUtils;
 import com.winlator.core.GPUHelper;
@@ -69,14 +77,17 @@ import org.json.JSONArray;
 import org.json.JSONException;
 
 import java.io.File;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class SettingsFragment extends Fragment {
+    private static final int COMPATIBILITY_EXECUTABLE_REQUEST_CODE = 5;
     private static final ExecutorService BACKGROUND_OPERATIONS = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "WinMali-settings-operations");
         thread.setDaemon(true);
@@ -106,6 +117,33 @@ public class SettingsFragment extends Fragment {
 
     @Override
     public void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        if (requestCode == COMPATIBILITY_EXECUTABLE_REQUEST_CODE) {
+            if (resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {
+                Context context = getContext();
+                if (context == null) return;
+                try (InputStream input = context.getContentResolver().openInputStream(data.getData())) {
+                    CompatibilityCenter.ExecutableArchitecture architecture =
+                        CompatibilityCenter.detectPEArchitecture(input);
+                    String detail = architecture.label;
+                    if (architecture == CompatibilityCenter.ExecutableArchitecture.ARM64EC) {
+                        detail += "\nARM64EC is detected, but execution remains disabled until an FEX/ARM64EC launcher is integrated.";
+                    }
+                    else if (architecture == CompatibilityCenter.ExecutableArchitecture.UNKNOWN) {
+                        detail += "\nThe selected file does not contain a recognized PE header.";
+                    }
+                    new AlertDialog.Builder(context)
+                        .setTitle("Windows executable architecture")
+                        .setMessage("Detected architecture: " + detail)
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show();
+                }
+                catch (Exception error) {
+                    Toast.makeText(context, "Unable to inspect this file.", Toast.LENGTH_LONG).show();
+                }
+            }
+            return;
+        }
+
         if (requestCode == MainActivity.OPEN_FILE_REQUEST_CODE && resultCode == Activity.RESULT_OK) {
             try {
                 if (selectWineFileCallback != null && data != null) selectWineFileCallback.call(data.getData());
@@ -125,7 +163,8 @@ public class SettingsFragment extends Fragment {
         preferences = PreferenceManager.getDefaultSharedPreferences(context);
 
         view.findViewById(R.id.BTGPUDiagnostics).setOnClickListener((v) -> showGPUDiagnostics(context));
-        view.findViewById(R.id.BTCompatibilityRuntimeBundle).setOnClickListener((v) -> showCompatibilityRuntimeBundle(context));
+        view.findViewById(R.id.BTCompatibilityRuntimeBundle).setOnClickListener((v) -> showRuntimeCenter(context));
+        view.findViewById(R.id.BTCompatibilityCenter).setOnClickListener((v) -> showCompatibilityCenter(context));
 
         final Spinner sSoundFont = view.findViewById(R.id.SSoundFont);
         String soundfont = preferences.getString("soundfont", null);
@@ -460,7 +499,7 @@ public class SettingsFragment extends Fragment {
         dialog.setIcon(R.drawable.icon_wine);
 
         EditText etVersion = dialog.findViewById(R.id.ETVersion);
-        etVersion.setText("Wine "+wineInfo.version+(wineInfo.subversion != null ? " ("+wineInfo.subversion+")" : ""));
+        etVersion.setText(wineInfo.toString());
 
         final EditText etSize = dialog.findViewById(R.id.ETSize);
         final AtomicLong totalSizeRef = new AtomicLong();
@@ -473,27 +512,587 @@ public class SettingsFragment extends Fragment {
         dialog.show();
     }
 
-    private void showCompatibilityRuntimeBundle(Context context) {
-        StringBuilder details = new StringBuilder();
-        details.append("Upstream release references (snapshot ")
-            .append(CompatibilityRuntimeCatalog.SNAPSHOT_DATE).append("):\\n\\n");
-        for (CompatibilityRuntimeCatalog.Release release : CompatibilityRuntimeCatalog.getReleases()) {
-            details.append(release.getTitle()).append("\\n")
-                .append(release.note).append("\\n\\n");
-        }
-        details.append(CompatibilityRuntimeCatalog.getArchitectureExplanation())
-            .append("\\n\\n")
-            .append("Import an Android/AArch64 Wine build with the existing Wine installer. ")
-            .append("A winmali-runtime.json manifest can declare and validate x86, x86_64, and verified ARM64EC guest libraries. ")
-            .append("Proton is listed for tracking, but this 2.0.0 beta does not yet include an Android Proton session launcher; ")
-            .append("desktop Proton archives are not Android-compatible.");
 
-        new AlertDialog.Builder(context)
-            .setTitle(R.string.compatibility_runtime_bundle)
-            .setMessage(details.toString())
-            .setPositiveButton("Import Wine build", (dialog, which) -> selectWineFileForInstall())
+    private void showCompatibilityCenter(Context context) {
+        final int background = Color.rgb(26, 30, 33);
+        final int buttonBackground = Color.rgb(55, 64, 70);
+        LinearLayout content = new LinearLayout(context);
+        content.setOrientation(LinearLayout.VERTICAL);
+        int padding = (int)(16 * context.getResources().getDisplayMetrics().density);
+        content.setPadding(padding, 0, padding, padding);
+        content.setBackgroundColor(background);
+
+        TextView description = new TextView(context);
+        description.setText(R.string.compatibility_center_description);
+        description.setTextColor(Color.WHITE);
+        description.setTextSize(13);
+        content.addView(description);
+
+        TextView output = new TextView(context);
+        output.setText("Run a scan to inspect GPU APIs, driver suitability, Direct3D prerequisites, and runtime files.");
+        output.setTextColor(Color.WHITE);
+        output.setTextIsSelectable(true);
+        output.setTextSize(13);
+        output.setPadding(0, padding, 0, padding);
+        content.addView(output);
+
+        addCompatibilityActionButton(context, content, "Run full graphics and runtime scan", () -> {
+            output.setText("Scanning GPU, OpenGL, Vulkan, Wine, and runtime availability…");
+            Thread worker = new Thread(() -> {
+                String report = CompatibilityCenter.createDeviceReport(context, new ContainerManager(context));
+                output.post(() -> output.setText(report));
+            }, "WinMali-compatibility-report");
+            worker.setDaemon(true);
+            worker.start();
+        }, buttonBackground);
+
+        addCompatibilityActionButton(context, content, "Check Wine runtime dependencies", () ->
+            new AlertDialog.Builder(context)
+                .setTitle("Runtime dependency resolver")
+                .setMessage(CompatibilityCenter.getRuntimeDependencyReport(context))
+                .setPositiveButton(android.R.string.ok, null).show(), buttonBackground);
+
+        addCompatibilityActionButton(context, content, "Inspect a Windows .exe architecture", () -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("*/*");
+            try {
+                startActivityForResult(intent, COMPATIBILITY_EXECUTABLE_REQUEST_CODE);
+            }
+            catch (Exception error) {
+                Toast.makeText(context, "No file picker is available.", Toast.LENGTH_LONG).show();
+            }
+        }, buttonBackground);
+
+        addCompatibilityActionButton(context, content, "Container repair, profiles, and recovery", () ->
+            showCompatibilityContainerPicker(context), buttonBackground);
+
+        addCompatibilityActionButton(context, content, "Analyze a crash log", () ->
+            showCrashLogAnalyzer(context), buttonBackground);
+
+        addCompatibilityActionButton(context, content, "View local compatibility database", () ->
+            new AlertDialog.Builder(context)
+                .setTitle("Compatibility database")
+                .setMessage(CompatibilityCenter.getCompatibilityDatabaseReport(context))
+                .setPositiveButton(android.R.string.ok, null).show(), buttonBackground);
+
+        ScrollView scroll = new ScrollView(context);
+        scroll.setBackgroundColor(background);
+        scroll.addView(content);
+        AlertDialog dialog = new AlertDialog.Builder(context)
+            .setTitle(R.string.compatibility_center)
+            .setView(scroll)
             .setNegativeButton(android.R.string.ok, null)
+            .create();
+        dialog.show();
+        if (dialog.getWindow() != null) dialog.getWindow().setBackgroundDrawable(new ColorDrawable(background));
+        Button ok = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+        if (ok != null) styleRuntimeCenterButton(ok, buttonBackground);
+    }
+
+    private static void addCompatibilityActionButton(Context context, LinearLayout parent,
+            String label, Runnable action, int backgroundColor) {
+        Button button = new Button(context);
+        button.setText(label);
+        styleRuntimeCenterButton(button, backgroundColor);
+        button.setOnClickListener(view -> action.run());
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.topMargin = (int)(6 * context.getResources().getDisplayMetrics().density);
+        parent.addView(button, params);
+    }
+
+    private void showCompatibilityContainerPicker(Context context) {
+        ContainerManager manager = new ContainerManager(context);
+        ArrayList<Container> containers = manager.getContainers();
+        if (containers.isEmpty()) {
+            Toast.makeText(context, "No valid containers were found.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        String[] labels = new String[containers.size()];
+        for (int i = 0; i < containers.size(); i++) {
+            Container container = containers.get(i);
+            labels[i] = container.getName() + " (ID " + container.id + ")";
+        }
+        new AlertDialog.Builder(context)
+            .setTitle("Select a container")
+            .setItems(labels, (dialog, which) ->
+                showCompatibilityContainerTools(context, manager, containers.get(which)))
+            .setNegativeButton(android.R.string.cancel, null)
             .show();
+    }
+
+    private void showCompatibilityContainerTools(Context context, ContainerManager manager,
+            Container container) {
+        String[] actions = {
+            "Validate container configuration",
+            "Repair missing safe directories",
+            "Create full recovery point",
+            "Restore from a recovery point (new copy)",
+            "Migrate container configuration",
+            "Detect and apply native resolution",
+            "Save a per-game compatibility profile",
+            "Apply a saved per-game profile",
+            "Direct3D / DirectDraw DLL preflight",
+            "Save compatibility database note"
+        };
+        new AlertDialog.Builder(context)
+            .setTitle(container.getName())
+            .setItems(actions, (dialog, which) -> {
+                switch (which) {
+                    case 0: {
+                        CompatibilityCenter.ContainerValidation result =
+                            CompatibilityCenter.validateContainer(context, container);
+                        new AlertDialog.Builder(context).setTitle("Container validation")
+                            .setMessage(result.toReport())
+                            .setPositiveButton(android.R.string.ok, null).show();
+                        break;
+                    }
+                    case 1: {
+                        boolean repaired = CompatibilityCenter.repairContainer(context, container);
+                        String message = repaired
+                            ? "Safe missing folders were repaired.\n\n" +
+                                CompatibilityCenter.validateContainer(context, container).toReport()
+                            : "The container could not be repaired automatically. Existing prefix data and invalid files were left untouched.\n\n" +
+                                CompatibilityCenter.validateContainer(context, container).toReport();
+                        new AlertDialog.Builder(context).setTitle("Container repair")
+                            .setMessage(message).setPositiveButton(android.R.string.ok, null).show();
+                        break;
+                    }
+                    case 2:
+                        confirmCompatibilityAction(context,
+                            "Create a full copy of this container as a recovery point? The container must be stopped first.",
+                            () -> createCompatibilityRecoveryPoint(context, manager, container, null));
+                        break;
+                    case 3:
+                        showCompatibilityRecoveryPoints(context, manager, container);
+                        break;
+                    case 4:
+                        confirmCompatibilityAction(context,
+                            "Create a recovery copy first, then migrate this container's saved configuration?",
+                            () -> createCompatibilityRecoveryPoint(context, manager, container, () -> {
+                                boolean migrated = CompatibilityCenter.migrateContainer(container);
+                                Toast.makeText(context, migrated
+                                    ? "Container configuration migrated. A recovery copy was kept."
+                                    : "Migration failed. The recovery copy was kept.",
+                                    Toast.LENGTH_LONG).show();
+                            }));
+                        break;
+                    case 5: {
+                        String resolution = CompatibilityCenter.detectNativeResolution(context);
+                        new AlertDialog.Builder(context).setTitle("Native resolution")
+                            .setMessage("Detected display size: " + resolution + "\nApply this size to " + container.getName() + "?")
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .setPositiveButton("Apply", (d, w) -> {
+                                boolean applied = CompatibilityCenter.applyNativeResolution(context, container);
+                                Toast.makeText(context, applied
+                                    ? "Resolution saved: " + container.getScreenSize()
+                                    : "Unable to save the resolution.", Toast.LENGTH_LONG).show();
+                            }).show();
+                        break;
+                    }
+                    case 6:
+                        showSaveGameProfileDialog(context, container);
+                        break;
+                    case 7:
+                        showApplyGameProfileDialog(context, container);
+                        break;
+                    case 8:
+                        showContainerGraphicsPreflight(context, container);
+                        break;
+                    case 9:
+                        showCompatibilityDatabaseEntryDialog(context, container);
+                        break;
+                }
+            })
+            .setNegativeButton(android.R.string.cancel, null)
+            .show();
+    }
+
+
+    private static void confirmCompatibilityAction(Context context, String message, Runnable action) {
+        new AlertDialog.Builder(context)
+            .setMessage(message)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(android.R.string.ok, (dialog, which) -> action.run())
+            .show();
+    }
+
+    private void createCompatibilityRecoveryPoint(Context context, ContainerManager manager,
+            Container source, Runnable onCreated) {
+        if (CompatibilityCenter.isContainerActive(context, source)) {
+            Toast.makeText(context, "Stop this container before creating a recovery point.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        final int expectedId = manager.getNextContainerId();
+        manager.duplicateContainerAsync(source, success -> {
+            Container snapshot = manager.getContainerById(expectedId);
+            if (!success || snapshot == null) {
+                Toast.makeText(context, "Recovery copy could not be created.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            snapshot.setName(source.getName() + " [Recovery " + System.currentTimeMillis() + "]");
+            snapshot.putExtra("winmali_recovery_point", "true");
+            snapshot.putExtra("winmali_recovery_source", String.valueOf(source.id));
+            if (!snapshot.saveData()) {
+                Toast.makeText(context, "The container copy exists, but its recovery metadata could not be saved.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            Toast.makeText(context, "Full recovery point created as container " + snapshot.id + ".", Toast.LENGTH_LONG).show();
+            if (onCreated != null) onCreated.run();
+        });
+    }
+
+    private void showCompatibilityRecoveryPoints(Context context, ContainerManager manager,
+            Container source) {
+        ArrayList<Container> points = new ArrayList<>();
+        for (Container candidate : manager.getContainers()) {
+            if ("true".equals(candidate.getExtra("winmali_recovery_point", "false")) &&
+                String.valueOf(source.id).equals(candidate.getExtra("winmali_recovery_source", ""))) {
+                points.add(candidate);
+            }
+        }
+        if (points.isEmpty()) {
+            Toast.makeText(context, "No recovery points exist for this container.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        String[] labels = new String[points.size()];
+        for (int i = 0; i < points.size(); i++) {
+            labels[i] = points.get(i).getName() + " (ID " + points.get(i).id + ")";
+        }
+        new AlertDialog.Builder(context).setTitle("Restore recovery point")
+            .setItems(labels, (dialog, which) -> {
+                Container snapshot = points.get(which);
+                confirmCompatibilityAction(context,
+                    "Restore this recovery point as a separate container? The current container will not be overwritten.",
+                    () -> {
+                        final int expectedId = manager.getNextContainerId();
+                        manager.duplicateContainerAsync(snapshot, success -> {
+                            Container restored = manager.getContainerById(expectedId);
+                            if (!success || restored == null) {
+                                Toast.makeText(context, "Recovery restore failed.", Toast.LENGTH_LONG).show();
+                                return;
+                            }
+                            restored.setName(source.getName() + " (restored copy)");
+                            restored.putExtra("winmali_recovery_point", "false");
+                            restored.putExtra("winmali_restored_from", String.valueOf(snapshot.id));
+                            boolean saved = restored.saveData();
+                            Toast.makeText(context, saved
+                                ? "Recovery point restored as container " + restored.id + "."
+                                : "A restored copy was created, but its display name could not be saved.",
+                                Toast.LENGTH_LONG).show();
+                        });
+                    });
+            })
+            .setNegativeButton(android.R.string.cancel, null)
+            .show();
+    }
+
+    private void showSaveGameProfileDialog(Context context, Container container) {
+        EditText title = new EditText(context);
+        title.setSingleLine(true);
+        title.setHint("Shortcut name or Windows executable path");
+        new AlertDialog.Builder(context)
+            .setTitle("Save per-game profile")
+            .setMessage("The current DX wrapper, Box64 preset, and environment variables will be stored under this game key. Matching shortcuts use these settings for that launch only.")
+            .setView(title)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton("Save profile", (dialog, which) -> {
+                boolean saved = CompatibilityCenter.saveGameProfile(container,
+                    title.getText().toString(), container.getDXWrapper(),
+                    container.getBox64Preset(), container.getEnvVars());
+                Toast.makeText(context, saved ? "Per-game profile saved." : "Unable to save the profile.",
+                    Toast.LENGTH_LONG).show();
+            }).show();
+    }
+
+    private void showApplyGameProfileDialog(Context context, Container container) {
+        List<String> keys = CompatibilityCenter.getGameProfileKeys(container);
+        if (keys.isEmpty()) {
+            Toast.makeText(context, "No per-game profiles are saved in this container.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        String[] labels = keys.toArray(new String[0]);
+        new AlertDialog.Builder(context).setTitle("Apply per-game profile")
+            .setItems(labels, (dialog, which) -> {
+                boolean applied = CompatibilityCenter.applyGameProfile(context, container, labels[which]);
+                Toast.makeText(context, applied
+                    ? "Profile applied to this container. Launch using this configuration."
+                    : "Profile could not be applied; check that its Box64 preset still exists.",
+                    Toast.LENGTH_LONG).show();
+            })
+            .setNegativeButton(android.R.string.cancel, null)
+            .show();
+    }
+
+    private void showContainerGraphicsPreflight(Context context, Container container) {
+        String[] choices = {"Direct3D 9", "Direct3D 10", "Direct3D 11", "Direct3D 12", "DirectDraw", "D3DX dependencies"};
+        new AlertDialog.Builder(context).setTitle("Graphics DLL preflight")
+            .setItems(choices, (dialog, which) -> {
+                String report;
+                if (which == 5) {
+                    report = CompatibilityCenter.checkD3DXDependencies(container);
+                }
+                else if (which == 4) {
+                    File windows = new File(container.getRootDir(), ".wine/drive_c/windows");
+                    File ddraw64 = new File(windows, "system32/ddraw.dll");
+                    File ddraw32 = new File(windows, "syswow64/ddraw.dll");
+                    report = "DirectDraw DLL preflight\n64-bit ddraw.dll: " + ddraw64.isFile() +
+                        "\n32-bit ddraw.dll: " + ddraw32.isFile() +
+                        "\n\nFile presence is not proof of successful DirectDraw rendering.";
+                }
+                else {
+                    int version = which == 0 ? 9 : (which == 1 ? 10 : (which == 2 ? 11 : 12));
+                    report = CompatibilityCenter.checkContainerDirect3DDependencies(container, version);
+                }
+                new AlertDialog.Builder(context).setTitle(choices[which])
+                    .setMessage(report).setPositiveButton(android.R.string.ok, null).show();
+            })
+            .setNegativeButton(android.R.string.cancel, null)
+            .show();
+    }
+
+    private void showCrashLogAnalyzer(Context context) {
+        EditText logInput = new EditText(context);
+        logInput.setHint("Paste WinMali, Wine, Box64, Vulkan, or Direct3D log text");
+        logInput.setGravity(android.view.Gravity.TOP | android.view.Gravity.START);
+        logInput.setMinLines(6);
+        logInput.setMaxLines(12);
+        logInput.setSingleLine(false);
+        new AlertDialog.Builder(context)
+            .setTitle("Crash log analyzer")
+            .setView(logInput)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton("Analyze", (dialog, which) -> {
+                String report = CompatibilityCenter.analyzeCrashLog(logInput.getText().toString());
+                new AlertDialog.Builder(context).setTitle("Log analysis")
+                    .setMessage(report).setPositiveButton(android.R.string.ok, null).show();
+            }).show();
+    }
+
+    private void showCompatibilityDatabaseEntryDialog(Context context, Container container) {
+        LinearLayout fields = new LinearLayout(context);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        int padding = (int)(12 * context.getResources().getDisplayMetrics().density);
+        fields.setPadding(padding, 0, padding, 0);
+        EditText title = new EditText(context);
+        title.setSingleLine(true);
+        title.setHint("Game title");
+        EditText notes = new EditText(context);
+        notes.setHint("Observed result, GPU, DX wrapper, and notes");
+        notes.setMinLines(3);
+        notes.setMaxLines(5);
+        notes.setGravity(android.view.Gravity.TOP | android.view.Gravity.START);
+        fields.addView(title);
+        fields.addView(notes);
+        new AlertDialog.Builder(context).setTitle("Add local compatibility record")
+            .setView(fields)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton("Save", (dialog, which) -> {
+                String detail = notes.getText().toString().trim();
+                if (detail.isEmpty()) detail = "Container " + container.id + ", DX wrapper " + container.getDXWrapper();
+                boolean saved = CompatibilityCenter.recordCompatibility(context,
+                    title.getText().toString(), detail);
+                Toast.makeText(context, saved ? "Local compatibility record saved." : "Unable to save the record.",
+                    Toast.LENGTH_LONG).show();
+            }).show();
+    }
+
+    private void showRuntimeCenter(Context context) {
+        final int dialogBackgroundColor = Color.rgb(26, 30, 33); // #1A1E21
+        final int cardBackgroundColor = Color.rgb(36, 42, 46);
+        final int buttonBackgroundColor = Color.rgb(55, 64, 70);
+        final RuntimeCenterManager runtimeManager = new RuntimeCenterManager(context);
+        final LinearLayout runtimeList = new LinearLayout(context);
+        runtimeList.setOrientation(LinearLayout.VERTICAL);
+        runtimeList.setBackgroundColor(dialogBackgroundColor);
+        int padding = (int)(16 * context.getResources().getDisplayMetrics().density);
+        runtimeList.setPadding(padding, 0, padding, padding);
+
+        ScrollView scrollView = new ScrollView(context);
+        scrollView.setFillViewport(false);
+        scrollView.setBackgroundColor(dialogBackgroundColor);
+        scrollView.addView(runtimeList);
+
+        TextView dialogTitleView = new TextView(context);
+        dialogTitleView.setText(R.string.compatibility_runtime_bundle);
+        dialogTitleView.setTextColor(Color.WHITE);
+        dialogTitleView.setTextSize(20);
+        dialogTitleView.setTypeface(dialogTitleView.getTypeface(), android.graphics.Typeface.BOLD);
+        int titlePadding = (int)(20 * context.getResources().getDisplayMetrics().density);
+        dialogTitleView.setPadding(titlePadding, titlePadding, titlePadding, titlePadding);
+        dialogTitleView.setBackgroundColor(dialogBackgroundColor);
+
+        final AlertDialog dialog = new AlertDialog.Builder(context)
+            .setCustomTitle(dialogTitleView)
+            .setView(scrollView)
+            .setNegativeButton(android.R.string.ok, null)
+            .create();
+
+        final Runnable[] refreshRef = new Runnable[1];
+        refreshRef[0] = () -> {
+            runtimeList.removeAllViews();
+            TextView introduction = new TextView(context);
+            introduction.setText(R.string.runtime_center_description);
+            introduction.setTextSize(13);
+            introduction.setTextColor(Color.WHITE);
+            introduction.setPadding(0, 0, 0, padding);
+            runtimeList.addView(introduction);
+
+            for (RuntimeCenterCatalog.Runtime runtime : RuntimeCenterCatalog.getRuntimes()) {
+                LinearLayout card = new LinearLayout(context);
+                card.setOrientation(LinearLayout.VERTICAL);
+                card.setBackgroundColor(cardBackgroundColor);
+                int cardPadding = (int)(12 * context.getResources().getDisplayMetrics().density);
+                card.setPadding(cardPadding, cardPadding, cardPadding, cardPadding);
+                LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                cardParams.bottomMargin = padding / 2;
+                runtimeList.addView(card, cardParams);
+
+                TextView title = new TextView(context);
+                title.setText(runtime.displayName);
+                title.setTextSize(16);
+                title.setTextColor(Color.WHITE);
+                title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
+                card.addView(title);
+
+                TextView details = new TextView(context);
+                details.setText(runtime.family.label+" · "+runtime.getArchitectureLabel()+" · "+
+                    StringUtils.formatBytes(runtime.fileSizeBytes));
+                details.setTextSize(12);
+                details.setTextColor(Color.WHITE);
+                details.setPadding(0, 4, 0, 4);
+                card.addView(details);
+
+                WineInfo installedWine = runtimeManager.getInstalledWineInfo(runtime);
+                boolean installed = installedWine != null;
+                boolean downloaded = !installed && runtimeManager.isDownloaded(runtime);
+                boolean selected = runtimeManager.isDefault(runtime);
+                TextView status = new TextView(context);
+                if (installed) status.setText(selected ? R.string.runtime_center_default : R.string.runtime_center_installed);
+                else if (downloaded && runtime.supportedOnCurrentLauncher) status.setText(R.string.runtime_center_downloaded);
+                else if (downloaded) status.setText(R.string.runtime_center_unsupported);
+                else status.setText(R.string.runtime_center_not_downloaded);
+                status.setTextSize(12);
+                status.setTextColor(Color.WHITE);
+                card.addView(status);
+
+                TextView warning = new TextView(context);
+                warning.setText(runtime.warning);
+                warning.setTextSize(12);
+                warning.setTextColor(Color.WHITE);
+                warning.setPadding(0, 4, 0, 6);
+                card.addView(warning);
+
+                Button action = new Button(context);
+                styleRuntimeCenterButton(action, buttonBackgroundColor);
+                if (installed) {
+                    action.setText(selected ? R.string.runtime_center_default : R.string.runtime_center_set_default);
+                    action.setEnabled(!selected);
+                    action.setOnClickListener(v -> {
+                        if (runtimeManager.setDefault(runtime)) refreshRef[0].run();
+                        else AppUtils.showToast(context, R.string.runtime_center_set_default_failed);
+                    });
+                    card.addView(action);
+
+                    Button remove = new Button(context);
+                    styleRuntimeCenterButton(remove, buttonBackgroundColor);
+                    remove.setText(R.string.runtime_center_remove_runtime);
+                    remove.setOnClickListener(v -> ContentDialog.confirm(context,
+                        R.string.do_you_want_to_remove_this_wine_version, () ->
+                            removeInstalledWine(installedWine, () -> {
+                                runtimeManager.clearDefaultIfMatches(runtime.id);
+                                refreshRef[0].run();
+                            })));
+                    card.addView(remove);
+                }
+                else if (downloaded && runtime.supportedOnCurrentLauncher) {
+                    action.setText(R.string.runtime_center_install);
+                    action.setOnClickListener(v -> {
+                        action.setEnabled(false);
+                        action.setText(R.string.runtime_center_verifying);
+                        runtimeManager.prepareInstall(runtime, wineInfo -> {
+                            Activity activity = getActivity();
+                            if (activity == null) return;
+                            activity.runOnUiThread(() -> {
+                                if (wineInfo == null) {
+                                    AppUtils.showToast(context, R.string.unable_to_install_wine);
+                                    refreshRef[0].run();
+                                }
+                                else showWineInstallDialog(wineInfo);
+                            });
+                        });
+                    });
+                    card.addView(action);
+
+                    Button remove = new Button(context);
+                    styleRuntimeCenterButton(remove, buttonBackgroundColor);
+                    remove.setText(R.string.runtime_center_remove_download);
+                    remove.setOnClickListener(v -> {
+                        runtimeManager.deleteDownload(runtime);
+                        refreshRef[0].run();
+                    });
+                    card.addView(remove);
+                }
+                else if (downloaded) {
+                    action.setText(R.string.runtime_center_unsupported);
+                    action.setEnabled(false);
+                    card.addView(action);
+
+                    Button remove = new Button(context);
+                    styleRuntimeCenterButton(remove, buttonBackgroundColor);
+                    remove.setText(R.string.runtime_center_remove_download);
+                    remove.setOnClickListener(v -> {
+                        runtimeManager.deleteDownload(runtime);
+                        refreshRef[0].run();
+                    });
+                    card.addView(remove);
+                }
+                else {
+                    action.setText(R.string.runtime_center_download);
+                    action.setOnClickListener(v -> {
+                        action.setEnabled(false);
+                        action.setText(R.string.runtime_center_downloading);
+                        runtimeManager.download(getActivity(), runtime, success -> {
+                            Activity activity = getActivity();
+                            if (activity == null) return;
+                            activity.runOnUiThread(() -> {
+                                if (!success) AppUtils.showToast(context, R.string.runtime_center_download_failed);
+                                refreshRef[0].run();
+                            });
+                        });
+                    });
+                    card.addView(action);
+                }
+
+                Button source = new Button(context);
+                styleRuntimeCenterButton(source, buttonBackgroundColor);
+                source.setText(R.string.runtime_center_release_notes);
+                source.setOnClickListener(v -> {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(runtime.releaseUrl)));
+                    }
+                    catch (Exception error) {
+                        AppUtils.showToast(context, R.string.unable_to_import_profile);
+                    }
+                });
+                card.addView(source);
+            }
+        };
+
+        refreshRef[0].run();
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(dialogBackgroundColor));
+        }
+        Button okButton = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+        if (okButton != null) styleRuntimeCenterButton(okButton, buttonBackgroundColor);
+    }
+
+    private static void styleRuntimeCenterButton(Button button, int backgroundColor) {
+        button.setTextColor(Color.WHITE);
+        button.setBackgroundTintList(ColorStateList.valueOf(backgroundColor));
     }
 
     private void showGPUDiagnostics(Context context) {

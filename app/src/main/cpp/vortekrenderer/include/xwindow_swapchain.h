@@ -1,6 +1,8 @@
 #ifndef VORTEK_XWINDOW_SWAPCHAIN_H
 #define VORTEK_XWINDOW_SWAPCHAIN_H
 
+#include <android/hardware_buffer.h>
+
 #include "vortek.h"
 
 typedef struct XWindowSwapchain_Image {
@@ -22,6 +24,7 @@ typedef struct XWindowSwapchain {
     JMethods* jmethods;
     VkImage windowImage;
     VkDeviceMemory windowMemory;
+    AHardwareBuffer* windowHardwareBuffer;
     VkCommandPool commandPool;
     VkCommandBuffer* commandBuffers;
     uint64_t lastIdleTime;

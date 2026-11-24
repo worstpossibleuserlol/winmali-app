@@ -68,6 +68,10 @@ RingBuffer* RingBuffer_create(int shmFd, uint32_t bufferSize) {
     memset(sharedData, 0, shmSize);
 
     RingBuffer* ring = calloc(1, sizeof(RingBuffer));
+    if (ring == NULL) {
+        munmap(sharedData, shmSize);
+        return NULL;
+    }
     ring->useSemaphores = false;
     ring->sharedData = sharedData;
     ring->head = sharedData + offsetof(struct Offsets, head);

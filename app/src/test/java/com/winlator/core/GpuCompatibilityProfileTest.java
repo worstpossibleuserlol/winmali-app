@@ -56,6 +56,111 @@ public class GpuCompatibilityProfileTest {
     }
 
     @Test
+    public void bundledWine1010MaliDefaultUsesOpenGLWithoutUnsupportedOffscreenOverride() {
+        KeyValueSet config = new KeyValueSet();
+        config.put("version", DefaultVersion.WINED3D);
+        GpuCompatibilityProfile.applyMaliWineD3DDefaults(config,
+            GpuCompatibilityProfile.Vendor.MALI);
+        assertEquals("gl", config.get("renderer"));
+        assertEquals("", config.get("OffscreenRenderingMode"));
+        assertFalse(GpuCompatibilityProfile.supportsLegacyOffscreenRenderingMode(
+            DefaultVersion.WINED3D));
+    }
+
+    @Test
+    public void legacyWine95MaliDefaultUsesBackbufferWhenFboWasSelected() {
+        KeyValueSet config = new KeyValueSet();
+        config.put("version", "9.5");
+        config.put("OffscreenRenderingMode", "fbo");
+        GpuCompatibilityProfile.applyMaliWineD3DDefaults(config,
+            GpuCompatibilityProfile.Vendor.MALI);
+        assertEquals("gl", config.get("renderer"));
+        assertEquals("backbuffer", config.get("OffscreenRenderingMode"));
+        assertTrue(GpuCompatibilityProfile.supportsLegacyOffscreenRenderingMode("9.5"));
+    }
+
+    @Test
+    public void wine96AndNewerDoNotReceiveTheRemovedBackbufferSetting() {
+        assertFalse(GpuCompatibilityProfile.supportsLegacyOffscreenRenderingMode("9.6"));
+        assertFalse(GpuCompatibilityProfile.supportsLegacyOffscreenRenderingMode("10.10"));
+        assertFalse(GpuCompatibilityProfile.supportsLegacyOffscreenRenderingMode("11.0"));
+        assertFalse(GpuCompatibilityProfile.supportsLegacyOffscreenRenderingMode("unknown"));
+    }
+
+    @Test
+    public void legacyOffscreenModeChoiceIsPreservedForSupportedWine() {
+        KeyValueSet config = new KeyValueSet();
+        config.put("version", "9.5");
+        config.put("renderer", "gdi");
+        config.put("OffscreenRenderingMode", "backbuffer");
+        GpuCompatibilityProfile.applyMaliWineD3DDefaults(config,
+            GpuCompatibilityProfile.Vendor.MALI);
+        assertEquals("gdi", config.get("renderer"));
+        assertEquals("backbuffer", config.get("OffscreenRenderingMode"));
+    }
+
+    @Test
+    public void maliWineD3DDefaultsPreserveNonDefaultExplicitChoices() {
+        KeyValueSet config = new KeyValueSet();
+        config.put("renderer", "gdi");
+        config.put("OffscreenRenderingMode", "backbuffer");
+        GpuCompatibilityProfile.applyMaliWineD3DDefaults(config,
+            GpuCompatibilityProfile.Vendor.MALI);
+        assertEquals("gdi", config.get("renderer"));
+        assertEquals("backbuffer", config.get("OffscreenRenderingMode"));
+    }
+
+    @Test
+    public void maliWineD3DPreservesAnExplicitVulkanRendererChoice() {
+        KeyValueSet config = new KeyValueSet();
+        config.put("renderer", "vulkan");
+        config.put("OffscreenRenderingMode", "backbuffer");
+        GpuCompatibilityProfile.applyMaliWineD3DDefaults(config,
+            GpuCompatibilityProfile.Vendor.MALI);
+        assertEquals("vulkan", config.get("renderer"));
+    }
+
+    @Test
+    public void maliEnvironmentDisablesMesaGlThreadAndAddsBox64CompatibilityDefaults() {
+        EnvVars envVars = new EnvVars(Container.DEFAULT_ENV_VARS);
+        GpuCompatibilityProfile.applyMaliEnvironmentDefaults(envVars,
+            GpuCompatibilityProfile.Vendor.MALI);
+        assertEquals("0", envVars.get("mesa_glthread"));
+        assertEquals("1", envVars.get("BOX64_MMAP32"));
+        assertEquals("2", envVars.get("BOX64_SAFEFLAGS"));
+    }
+
+    @Test
+    public void maliEnvironmentPreservesExplicitNonDefaultEnvironmentValues() {
+        EnvVars envVars = new EnvVars(
+            "mesa_glthread=false BOX64_MMAP32=0 BOX64_SAFEFLAGS=1");
+        GpuCompatibilityProfile.applyMaliEnvironmentDefaults(envVars,
+            GpuCompatibilityProfile.Vendor.MALI);
+        assertEquals("false", envVars.get("mesa_glthread"));
+        assertEquals("0", envVars.get("BOX64_MMAP32"));
+        assertEquals("1", envVars.get("BOX64_SAFEFLAGS"));
+    }
+
+    @Test
+    public void nonMaliEnvironmentValuesAreNotModified() {
+        EnvVars envVars = new EnvVars(Container.DEFAULT_ENV_VARS);
+        GpuCompatibilityProfile.applyMaliEnvironmentDefaults(envVars,
+            GpuCompatibilityProfile.Vendor.ADRENO);
+        assertEquals("true", envVars.get("mesa_glthread"));
+        assertEquals("", envVars.get("BOX64_MMAP32"));
+        assertEquals("", envVars.get("BOX64_SAFEFLAGS"));
+    }
+
+    @Test
+    public void nonMaliWineD3DDefaultsAreNotModified() {
+        KeyValueSet config = new KeyValueSet();
+        GpuCompatibilityProfile.applyMaliWineD3DDefaults(config,
+            GpuCompatibilityProfile.Vendor.ADRENO);
+        assertEquals("", config.get("renderer", ""));
+        assertEquals("", config.get("OffscreenRenderingMode", ""));
+    }
+
+    @Test
     public void dxvkRequiresVulkan11AndSwapchain() {
         GpuCompatibilityProfile withoutSwapchain = GpuCompatibilityProfile.resolve(
             "Mali-G710", "ARM", vk(1, 3, 0), new String[0]);

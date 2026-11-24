@@ -84,35 +84,53 @@ static void* requestHandlerThread(void* param) {
 
 static bool setupRingBuffers(VkContext* context) {
     int shmFds[2 + RING_POOL_ARRAY_LEN];
+    for (int i = 0; i < ARRAY_SIZE(shmFds); i++) shmFds[i] = -1;
+
     shmFds[0] = ashmemCreateRegion("vt-server-ring", RingBuffer_getSHMemSize(SERVER_RING_BUFFER_SIZE));
+    if (shmFds[0] < 0) goto error;
     shmFds[1] = ashmemCreateRegion("vt-client-ring", RingBuffer_getSHMemSize(CLIENT_RING_BUFFER_SIZE));
+    if (shmFds[1] < 0) goto error;
 
     context->serverRing = RingBuffer_create(shmFds[0], SERVER_RING_BUFFER_SIZE);
-    if (!context->serverRing) return false;
-
+    if (!context->serverRing) goto error;
     context->clientRing = RingBuffer_create(shmFds[1], CLIENT_RING_BUFFER_SIZE);
-    if (!context->clientRing) return false;
+    if (!context->clientRing) goto error;
 
     for (int i = 0; i < RING_POOL_ARRAY_LEN; i++) {
         shmFds[2+i] = ashmemCreateRegion("vt-ring-pool", RingBuffer_getSHMemSize(RING_POOL_BUFFER_SIZE));
+        if (shmFds[2+i] < 0) goto error;
         context->ringPool[i].ring = RingBuffer_create(shmFds[2+i], RING_POOL_BUFFER_SIZE);
+        if (!context->ringPool[i].ring) goto error;
         context->ringPool[i].ring->useSemaphores = true;
         context->ringPool[i].acquired = false;
-        if (!context->ringPool[i].ring) return false;
     }
 
     int result = send_fds(context->clientFd, shmFds, ARRAY_SIZE(shmFds), NULL, 0);
-    for (int i = 0; i < ARRAY_SIZE(shmFds); i++) close(shmFds[i]);
+    for (int i = 0; i < ARRAY_SIZE(shmFds); i++) {
+        if (shmFds[i] >= 0) close(shmFds[i]);
+        shmFds[i] = -1;
+    }
     if (result < 0) return false;
 
-    pthread_create(&context->requestHandlerThread, NULL, requestHandlerThread, context);
+    int threadResult = pthread_create(&context->requestHandlerThread, NULL, requestHandlerThread, context);
+    if (threadResult != 0) {
+        context->requestHandlerThread = 0;
+        return false;
+    }
     return true;
+
+error:
+    for (int i = 0; i < ARRAY_SIZE(shmFds); i++) {
+        if (shmFds[i] >= 0) close(shmFds[i]);
+    }
+    return false;
 }
 
 VkContext* createVkContext(JNIEnv* env, jobject obj, int clientFd, jobject options) {
     jobjectArray exposedDeviceExtensions = getJFieldByName(env, options, "exposedDeviceExtensions", JSIGNATURE_ARRAY_STRING).l;
 
     VkContext* context = calloc(1, sizeof(VkContext));
+    if (context == NULL) return NULL;
     context->clientFd = clientFd;
     context->vkMaxVersion = getJFieldByName(env, options, "vkMaxVersion", "I").i;
     context->maxDeviceMemory = getJFieldByName(env, options, "maxDeviceMemory", "S").s;
@@ -144,28 +162,32 @@ VkContext* createVkContext(JNIEnv* env, jobject obj, int clientFd, jobject optio
 }
 
 void destroyVkContext(JNIEnv* env, VkContext* context) {
+    if (!context) return;
     context->status = VK_ERROR_DEVICE_LOST;
 
     if (context->requestHandlerThread) {
-        RingBuffer_setStatus(context->serverRing, RING_STATUS_EXIT);
-        RingBuffer_setStatus(context->clientRing, RING_STATUS_EXIT);
-
+        if (context->serverRing) RingBuffer_setStatus(context->serverRing, RING_STATUS_EXIT);
+        if (context->clientRing) RingBuffer_setStatus(context->clientRing, RING_STATUS_EXIT);
         for (int i = 0; i < RING_POOL_ARRAY_LEN; i++) {
-            RingBuffer_setStatus(context->ringPool[i].ring, RING_STATUS_EXIT);
+            if (context->ringPool[i].ring) {
+                RingBuffer_setStatus(context->ringPool[i].ring, RING_STATUS_EXIT);
+            }
         }
-
         pthread_join(context->requestHandlerThread, NULL);
+        context->requestHandlerThread = 0;
+    }
 
+    if (context->threadPool) {
         ThreadPool_destroy(context->threadPool);
         context->threadPool = NULL;
-
-        context->requestHandlerThread = 0;
-        RingBuffer_free(context->serverRing);
-        RingBuffer_free(context->clientRing);
-
-        for (int i = 0; i < RING_POOL_ARRAY_LEN; i++) {
-            RingBuffer_free(context->ringPool[i].ring);
-        }
+    }
+    RingBuffer_free(context->serverRing);
+    context->serverRing = NULL;
+    RingBuffer_free(context->clientRing);
+    context->clientRing = NULL;
+    for (int i = 0; i < RING_POOL_ARRAY_LEN; i++) {
+        RingBuffer_free(context->ringPool[i].ring);
+        context->ringPool[i].ring = NULL;
     }
 
     if (context->jmethods.obj) {

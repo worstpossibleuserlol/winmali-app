@@ -64,3 +64,17 @@ tasks.withType(Test).configureEach {
         showStackTraces true
     }
 }
+
+ 
+// Build the original x86 Direct3D 9 diagnostic from source before packaging.
+tasks.register("buildWinMaliDirect3DTest", Exec) {
+    inputs.file(rootProject.file("tools/testd3d/TestDirect3D.cpp"))
+    inputs.file(rootProject.file("tools/testd3d/build.sh"))
+    outputs.file(file("src/main/assets/testd3d/WinMaliD3DTest.exe"))
+    workingDir(rootProject.projectDir)
+    commandLine("bash", "tools/testd3d/build.sh")
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(tasks.named("buildWinMaliDirect3DTest"))
+}

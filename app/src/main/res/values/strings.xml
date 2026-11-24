@@ -98,6 +98,8 @@
     <string name="enable_csmt">Enable CSMT (Command Stream Multi-Thread)</string>
     <string name="gpu_name">GPU Name</string>
     <string name="gpu_diagnostics">GPU Diagnostics</string>
+    <string name="compatibility_center">Compatibility Center</string>
+    <string name="compatibility_center_description">Run GPU, OpenGL, Vulkan, Direct3D, runtime, architecture, and container checks. API and DLL checks are preflight diagnostics and do not prove that a Windows game renders correctly.</string>
     <string name="gpu_diagnostics_description">Inspect the graphics hardware and APIs reported by Android. This check runs only when opened.</string>
     <string name="gpu_diagnostics_loading">Checking GPU and graphics APIs...</string>
     <string name="gpu_diagnostics_report">GPU type: %1$s\nRenderer: %2$s\nVendor: %3$s\nOpenGL: %4$s\nVulkan API: %5$s\nVulkan device extensions reported: %6$s\nTurnip: %7$s\n\nA detected API does not guarantee that every graphics backend or Windows application will work.</string>
@@ -107,6 +109,7 @@
     <string name="unknown">Unknown</string>
     <string name="other">Other</string>
     <string name="offscreen_rendering_mode">Offscreen Rendering Mode</string>
+    <string name="offscreen_rendering_unsupported">This WineD3D version requires FBO rendering; the Backbuffer option is not supported.</string>
     <string name="enable_strict_shader_math">Enable Strict Shader Math</string>
     <string name="video_memory_size">Video Memory Size</string>
     <string name="none">None</string>
@@ -400,8 +403,24 @@
     <string name="fgs_notification_content_else">WinMali is running in the background</string>
     <string name="save_mem_on_run_from_steam">Save memory on run from Steam</string>
     <string name="present_mode">Present Mode</string>
-    <string name="compatibility_runtime_bundle">Compatibility Runtime Bundle</string>
-    <string name="compatibility_runtime_bundle_description">View Wine and Proton release references, Android host requirements, and supported Windows guest architectures.</string>
+    <string name="compatibility_runtime_bundle">Runtime Center</string>
+    <string name="compatibility_runtime_bundle_description">Download and manage Proton and Wine runtimes from inside WinMali.</string>
+    <string name="runtime_center_description">Download a runtime before selecting it. Proton Wine x86-64 is the recommended default for new containers after installation. ARM64EC packages can be downloaded and verified, but cannot be activated until an ARM64EC/FEX launcher is integrated. Experimental packages may be unstable.</string>
+    <string name="runtime_center_download">Download</string>
+    <string name="runtime_center_downloading">Downloading…</string>
+    <string name="runtime_center_install">Install runtime</string>
+    <string name="runtime_center_verifying">Verifying runtime…</string>
+    <string name="runtime_center_set_default">Set as default for new containers</string>
+    <string name="runtime_center_default">Default for new containers</string>
+    <string name="runtime_center_installed">Installed</string>
+    <string name="runtime_center_downloaded">Downloaded and verified</string>
+    <string name="runtime_center_not_downloaded">Not downloaded</string>
+    <string name="runtime_center_unsupported">Downloaded — not launchable by this runtime engine yet</string>
+    <string name="runtime_center_remove_download">Remove download</string>
+    <string name="runtime_center_remove_runtime">Remove installed runtime</string>
+    <string name="runtime_center_release_notes">Release notes</string>
+    <string name="runtime_center_download_failed">Runtime download or SHA-256 verification failed.</string>
+    <string name="runtime_center_set_default_failed">Install this runtime before setting it as the default.</string>
 
     <string name="auto_gpu_settings">Automatically configure graphics for this device</string>
     <string name="gpu_profile_detecting">Detecting GPU and graphics capabilities…</string>

@@ -153,6 +153,68 @@ public final class GpuCompatibilityProfile {
         return driver;
     }
 
+    /**
+     * Keeps Mali's automatic WineD3D renderer on the OpenGL path. Explicit
+     * renderer choices remain untouched. The legacy backbuffer option is only
+     * applied to WineD3D versions that still implement OffscreenRenderingMode.
+     */
+    public static KeyValueSet applyMaliWineD3DDefaults(KeyValueSet config, Vendor vendor) {
+        KeyValueSet resolved = config != null ? config : new KeyValueSet();
+        if (vendor != Vendor.MALI) return resolved;
+
+        String renderer = resolved.get("renderer", "").trim();
+        if (renderer.isEmpty()) {
+            resolved.put("renderer", "gl");
+        }
+
+        String version = resolved.get("version", DefaultVersion.WINED3D);
+        if (supportsLegacyOffscreenRenderingMode(version)) {
+            String offscreenMode = resolved.get("OffscreenRenderingMode", "").trim();
+            if (offscreenMode.isEmpty() || offscreenMode.equalsIgnoreCase("fbo")) {
+                resolved.put("OffscreenRenderingMode", "backbuffer");
+            }
+        }
+        return resolved;
+    }
+
+    /**
+     * Wine removed OffscreenRenderingMode in 9.6; 9.5 is the last upstream
+     * release whose WineD3D parser accepts it. Unknown version labels are
+     * treated conservatively as not supporting the option.
+     */
+    public static boolean supportsLegacyOffscreenRenderingMode(String wineD3DVersion) {
+        if (wineD3DVersion == null) return false;
+        Matcher matcher = Pattern.compile("^\\s*(\\d+)\\.(\\d+)(?:\\.|$|[-+])")
+            .matcher(wineD3DVersion.trim());
+        if (!matcher.find()) return false;
+
+        try {
+            int major = Integer.parseInt(matcher.group(1));
+            int minor = Integer.parseInt(matcher.group(2));
+            return major < 9 || (major == 9 && minor <= 5);
+        }
+        catch (NumberFormatException ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * Applies conservative Box64/Mesa defaults recommended by Mali Winlator
+     * configurations, without replacing explicitly supplied non-default values.
+     */
+    public static EnvVars applyMaliEnvironmentDefaults(EnvVars envVars, Vendor vendor) {
+        EnvVars resolved = envVars != null ? envVars : new EnvVars();
+        if (vendor != Vendor.MALI) return resolved;
+
+        String glThread = resolved.get("mesa_glthread");
+        if (glThread.isEmpty() || glThread.equalsIgnoreCase("true") || glThread.equals("1")) {
+            resolved.put("mesa_glthread", "0");
+        }
+        if (!resolved.has("BOX64_MMAP32")) resolved.put("BOX64_MMAP32", "1");
+        if (!resolved.has("BOX64_SAFEFLAGS")) resolved.put("BOX64_SAFEFLAGS", "2");
+        return resolved;
+    }
+
     public String getVendorLabel() {
         switch (vendor) {
             case MALI: return "Mali";

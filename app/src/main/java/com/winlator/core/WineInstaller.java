@@ -171,6 +171,26 @@ public abstract class WineInstaller {
         }));
     }
 
+    public static void extractWineFileForInstallAsync(Context context, File source, Callback<File> callback) {
+        OPERATIONS.execute(() -> {
+            if (context == null || source == null || !source.isFile()) {
+                if (callback != null) callback.call(null);
+                return;
+            }
+            File installedWineDir = RootFS.find(context).getInstalledWineDir();
+            File destination = new File(installedWineDir, "preinstall/wine");
+            if ((FileUtils.isSymlink(destination) || destination.exists()) && !FileUtils.delete(destination)) {
+                if (callback != null) callback.call(null);
+                return;
+            }
+            boolean prepared = destination.mkdirs() && destination.isDirectory();
+            TarCompressorUtils.Type archiveType = prepared ? TarCompressorUtils.detectType(source) : null;
+            boolean success = archiveType != null && TarCompressorUtils.extract(archiveType, source, destination);
+            if (!success) FileUtils.delete(destination);
+            if (callback != null) callback.call(success ? destination : null);
+        });
+    }
+
     public static void extractWineFileForInstallAsync(Context context, Uri uri, Callback<File> callback) {
         OPERATIONS.execute(() -> {
             File destination = new File(RootFS.find(context).getInstalledWineDir(), "/preinstall/wine");

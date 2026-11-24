@@ -1,3 +1,5 @@
+#include <android/log.h>
+
 #include "xwindow_swapchain.h"
 #include "vulkan_helper.h"
 #include "time_utils.h"
@@ -37,11 +39,26 @@ static AHardwareBuffer* getWindowHardwareBuffer(JMethods* jmethods, int windowId
 static VkResult createWindowImage(XWindowSwapchain* swapchain, VkFormat imageFormat, VkImageUsageFlags imageUsage) {
     jboolean useHALPixelFormatBGRA8888 = imageFormat == VK_FORMAT_B8G8R8A8_UNORM || imageFormat == VK_FORMAT_B8G8R8A8_SRGB;
     AHardwareBuffer* hardwareBuffer = getWindowHardwareBuffer(swapchain->jmethods, swapchain->windowId, useHALPixelFormatBGRA8888);
+    if (hardwareBuffer == NULL) {
+        __android_log_print(ANDROID_LOG_ERROR, "WinMali-Vortek",
+            "No Android hardware buffer is available for window %d", swapchain->windowId);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
 
     AHardwareBuffer_Desc ahbDesc = {0};
     AHardwareBuffer_describe(hardwareBuffer, &ahbDesc);
+    if (ahbDesc.width == 0 || ahbDesc.height == 0) {
+        __android_log_print(ANDROID_LOG_ERROR, "WinMali-Vortek",
+            "Window %d returned an empty Android hardware buffer", swapchain->windowId);
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
     swapchain->imageSize[0] = ahbDesc.width;
     swapchain->imageSize[1] = ahbDesc.height;
+
+    // The drawable owns the Java-side reference. Keep a separate reference
+    // alive for the lifetime of the Vulkan imported memory object.
+    AHardwareBuffer_acquire(hardwareBuffer);
+    swapchain->windowHardwareBuffer = hardwareBuffer;
 
     VkExternalFormatANDROID externalFormatAndroid = {0};
     externalFormatAndroid.sType = VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID;
@@ -78,7 +95,20 @@ static VkResult createWindowImage(XWindowSwapchain* swapchain, VkFormat imageFor
 
     VkAndroidHardwareBufferPropertiesANDROID ahbProperties = {0};
     ahbProperties.sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID;
-    vulkanWrapper.vkGetAndroidHardwareBufferPropertiesANDROID(swapchain->device, hardwareBuffer, &ahbProperties);
+    result = vulkanWrapper.vkGetAndroidHardwareBufferPropertiesANDROID(
+        swapchain->device, hardwareBuffer, &ahbProperties);
+    if (result != VK_SUCCESS) {
+        __android_log_print(ANDROID_LOG_ERROR, "WinMali-Vortek",
+            "vkGetAndroidHardwareBufferPropertiesANDROID failed for window %d: %d",
+            swapchain->windowId, result);
+        return result;
+    }
+    if (ahbProperties.allocationSize == 0 || ahbProperties.memoryTypeBits == 0) {
+        __android_log_print(ANDROID_LOG_ERROR, "WinMali-Vortek",
+            "Vulkan reported invalid imported-buffer memory requirements for window %d",
+            swapchain->windowId);
+        return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    }
 
     VkImportAndroidHardwareBufferInfoANDROID memoryImportInfo = {0};
     memoryImportInfo.sType = VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID;
@@ -180,8 +210,15 @@ static VkResult createCopyCommandBuffers(XWindowSwapchain* swapchain, uint32_t g
     commandBufferInfo.commandBufferCount = swapchain->imageCount;
 
     swapchain->commandBuffers = calloc(swapchain->imageCount, sizeof(VkCommandBuffer));
+    if (swapchain->commandBuffers == NULL) return VK_ERROR_OUT_OF_HOST_MEMORY;
     result = vulkanWrapper.vkAllocateCommandBuffers(swapchain->device, &commandBufferInfo, swapchain->commandBuffers);
-    return result;
+    if (result != VK_SUCCESS) {
+        // No command-buffer handles are valid when allocation fails.
+        MEMFREE(swapchain->commandBuffers);
+        swapchain->commandBuffers = NULL;
+        return result;
+    }
+    return VK_SUCCESS;
 }
 
 static void setIdleImageThread(void* param) {
@@ -210,6 +247,10 @@ VkSurfaceFormatKHR* getSurfaceFormats(uint32_t* formatCount) {
     static const VkFormat supportedFormats[] = {VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_SRGB};
     int supportedFormatCount = ARRAY_SIZE(supportedFormats);
     VkSurfaceFormatKHR* surfaceFormats = calloc(supportedFormatCount, sizeof(VkSurfaceFormatKHR));
+    if (surfaceFormats == NULL) {
+        if (formatCount) *formatCount = 0;
+        return NULL;
+    }
 
     if (formatCount) *formatCount = supportedFormatCount;
 
@@ -223,11 +264,13 @@ VkSurfaceFormatKHR* getSurfaceFormats(uint32_t* formatCount) {
 
 XWindowSwapchain* XWindowSwapchain_create(VkDevice device, uint32_t graphicsQueueIndex, VkSwapchainCreateInfoKHR* swapchainInfo, JMethods* jmethods, int windowId) {
     XWindowSwapchain* swapchain = calloc(1, sizeof(XWindowSwapchain));
+    if (swapchain == NULL) return NULL;
     swapchain->device = device;
     swapchain->windowId = windowId;
     swapchain->presentMode = swapchainInfo->presentMode;
     swapchain->imageCount = swapchainInfo->minImageCount;
     swapchain->images = calloc(swapchain->imageCount, sizeof(XWindowSwapchain_Image));
+    if (swapchain->images == NULL) goto error;
     swapchain->jmethods = jmethods;
     getWindowSize(swapchain->jmethods, windowId, swapchain->windowSize);
 
@@ -265,6 +308,12 @@ void XWindowSwapchain_destroy(VkDevice device, XWindowSwapchain* swapchain) {
         swapchain->windowMemory = VK_NULL_HANDLE;
     }
 
+    // Release only after Vulkan no longer references the imported buffer.
+    if (swapchain->windowHardwareBuffer) {
+        AHardwareBuffer_release(swapchain->windowHardwareBuffer);
+        swapchain->windowHardwareBuffer = NULL;
+    }
+
     if (swapchain->commandBuffers) {
         vulkanWrapper.vkFreeCommandBuffers(device, swapchain->commandPool, swapchain->imageCount, swapchain->commandBuffers);
         MEMFREE(swapchain->commandBuffers);
@@ -275,7 +324,7 @@ void XWindowSwapchain_destroy(VkDevice device, XWindowSwapchain* swapchain) {
         swapchain->commandPool = NULL;
     }
 
-    for (int i = 0; i < swapchain->imageCount; i++) {
+    for (int i = 0; swapchain->images && i < swapchain->imageCount; i++) {
         XWindowSwapchain_Image* swapchainImage = &swapchain->images[i];
 
         if (swapchain->presentMode != VK_PRESENT_MODE_IMMEDIATE_KHR) {

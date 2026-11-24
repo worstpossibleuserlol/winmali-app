@@ -116,6 +116,10 @@ public class VortekRendererComponent extends EnvironmentComponent implements Con
         Window window = xServer.windowManager.getWindow(windowId);
         if (window != null) {
             GPUImage texture = GPUImage.createOrObtain(xServer, window.getContent(), false, useHALPixelFormatBGRA8888);
+            if (texture == null) {
+                android.util.Log.e("WinMali-Vortek", "Unable to acquire the shared buffer for window " + windowId);
+                return 0;
+            }
             return texture.getHardwareBufferPtr();
         }
         return 0;
