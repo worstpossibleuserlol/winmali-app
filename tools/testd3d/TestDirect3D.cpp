@@ -13,6 +13,7 @@ namespace {
 constexpr char kWindowClass[] = "WinMaliDirect3D9TestWindow";
 constexpr unsigned int kWarmupFrames = 24;
 constexpr unsigned int kRequiredVerifiedFrames = 3;
+constexpr unsigned int kReverifyIntervalFrames = 120;
 constexpr DWORD kClearColor = D3DCOLOR_XRGB(20, 26, 38);
 
 static HWND g_window = nullptr;
@@ -120,6 +121,7 @@ void reportVisualFailure(const char* sampleName, DWORD pixel) {
 void reportPixelReadbackUnavailable(const char* stage, HRESULT result) {
     if (g_pixelVerificationUnavailable) return;
     g_pixelVerificationUnavailable = true;
+    g_passReported = false;
 
     writeLog("INCONCLUSIVE: pixel readback unavailable at %s; "
         "HRESULT=0x%08lX. D3D drawing and Present will continue.",
@@ -504,9 +506,14 @@ void renderFrame() {
 
     if (!drawTestPattern()) return;
 
+    const bool initialVerificationDue =
+        g_verifiedFrames < kRequiredVerifiedFrames && g_frames >= kWarmupFrames;
+    const bool periodicVerificationDue =
+        g_passReported && g_frames > 0 &&
+        (g_frames % kReverifyIntervalFrames) == 0;
+
     if (!g_pixelVerificationUnavailable &&
-        g_verifiedFrames < kRequiredVerifiedFrames &&
-        g_frames >= kWarmupFrames) {
+        (initialVerificationDue || periodicVerificationDue)) {
         const VerifyResult verification = verifyBackBufferPixels();
         if (verification == VerifyResult::VISUAL_FAILURE) return;
     }
