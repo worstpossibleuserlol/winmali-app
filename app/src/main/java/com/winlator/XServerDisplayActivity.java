@@ -708,6 +708,14 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             return false;
         }
 
+        // Do not leave the legacy upstream test in the Start Menu's executable
+        // directory. The replacement is built from this repository's source.
+        File legacyTestExecutable = new File(appsDir, "TestD3D.exe");
+        if (legacyTestExecutable.exists() && !legacyTestExecutable.delete()) {
+            android.util.Log.e("WinMali-D3D", "Unable to remove the legacy TestD3D.exe from the shared app directory");
+            return false;
+        }
+
         android.util.Log.i("WinMali-D3D", "Installed source-built Direct3D 9 diagnostic (" +
             testExecutable.length() + " bytes)");
         return true;
