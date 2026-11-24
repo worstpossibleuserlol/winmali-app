@@ -98,6 +98,8 @@
     <string name="enable_csmt">Enable CSMT (Command Stream Multi-Thread)</string>
     <string name="gpu_name">GPU Name</string>
     <string name="gpu_diagnostics">GPU Diagnostics</string>
+    <string name="compatibility_center">Compatibility Center</string>
+    <string name="compatibility_center_description">Run GPU, OpenGL, Vulkan, Direct3D, runtime, architecture, and container checks. API and DLL checks are preflight diagnostics and do not prove that a Windows game renders correctly.</string>
     <string name="gpu_diagnostics_description">Inspect the graphics hardware and APIs reported by Android. This check runs only when opened.</string>
     <string name="gpu_diagnostics_loading">Checking GPU and graphics APIs...</string>
     <string name="gpu_diagnostics_report">GPU type: %1$s\nRenderer: %2$s\nVendor: %3$s\nOpenGL: %4$s\nVulkan API: %5$s\nVulkan device extensions reported: %6$s\nTurnip: %7$s\n\nA detected API does not guarantee that every graphics backend or Windows application will work.</string>
