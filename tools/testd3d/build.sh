@@ -19,8 +19,13 @@ mkdir -p "$OUTPUT_DIR"
     -static -static-libgcc -static-libstdc++ -Wl,--subsystem,windows \
     -o "$OUTPUT" "$SOURCE" -ld3d9 -luser32 -lgdi32
 test -s "$OUTPUT"
-"$OBJDUMP" -f "$OUTPUT" | grep -q "pei-i386"
-"$OBJDUMP" -p "$OUTPUT" | grep -qi "d3d9.dll"
+# Capture the full objdump output before matching it. With pipefail enabled,
+# grep -q can close the pipe early and make objdump exit with SIGPIPE (141).
+FILE_INFO="$("$OBJDUMP" -f "$OUTPUT")"
+grep -q "pei-i386" <<< "$FILE_INFO"
+
+IMPORT_INFO="$("$OBJDUMP" -p "$OUTPUT")"
+grep -qi "d3d9.dll" <<< "$IMPORT_INFO"
 python3 - "$OUTPUT" <<'PY'
 import pathlib
 import struct
