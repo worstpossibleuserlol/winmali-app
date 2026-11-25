@@ -514,6 +514,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             containerDataChanged = true;
         }
 
+        if (migrateLegacyMaliWineD3DDefaults()) containerDataChanged = true;
         if (verifyUserRegistry()) containerDataChanged = true;
         int dxWrapperStatus = extractDXWrapperFiles();
         if (dxWrapperStatus < 0) {
@@ -1090,6 +1091,27 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         if (!hasRequiredD3DWrapperFiles()) return -1;
         container.putExtra("dxwrapper", cacheId);
         return 1;
+    }
+
+    /**
+     * Upgrade containers that stored the old WineD3D defaults on Mali.
+     * Explicit non-default custom choices are kept unchanged.
+     */
+    private boolean migrateLegacyMaliWineD3DDefaults() {
+        if (!dxwrapper.equals(DXWrappers.WINED3D) || !GraphicsDrivers.isMaliGPU(this) ||
+            container.getExtra("maliD3DDefaultsVersion").equals("2")) return false;
+
+        String renderer = dxwrapperConfig[0].get("renderer");
+        String offscreenMode = dxwrapperConfig[0].get("OffscreenRenderingMode");
+        boolean legacyRenderer = renderer.isEmpty() || renderer.equalsIgnoreCase("gl");
+        boolean legacyOffscreenMode = offscreenMode.isEmpty() || offscreenMode.equalsIgnoreCase("fbo");
+        if (!legacyRenderer || !legacyOffscreenMode) return false;
+
+        dxwrapperConfig[0].put("renderer", "vulkan");
+        dxwrapperConfig[0].put("OffscreenRenderingMode", "backbuffer");
+        container.setDXWrapperConfig(dxwrapperConfig[0].toString()+"|"+dxwrapperConfig[1].toString());
+        container.putExtra("maliD3DDefaultsVersion", "2");
+        return true;
     }
 
     private boolean hasRequiredD3DWrapperFiles() {
