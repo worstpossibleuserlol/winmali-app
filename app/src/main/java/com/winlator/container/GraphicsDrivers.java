@@ -52,6 +52,14 @@ public abstract class GraphicsDrivers {
         else return new String[0];
     }
 
+    public static String getDefaultWineD3DRenderer(boolean maliGpu) {
+        return maliGpu ? "vulkan" : "gl";
+    }
+
+    public static String getDefaultWineD3DOffscreenRenderingMode(boolean maliGpu) {
+        return maliGpu ? "backbuffer" : "fbo";
+    }
+
     public static boolean supportsTurnip(Context context) {
         return context != null && GPUHelper.getAdrenoModelId(context) > 0;
     }
