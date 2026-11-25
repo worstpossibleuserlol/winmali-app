@@ -1036,7 +1036,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             else {
                 String installedVersion = GeneralComponents.extractFileResolvedVersion(
                     GeneralComponents.Type.WINED3D, this, wrapperVersion,
-                    DefaultVersion.WINED3D);
+                    DefaultVersion.WINED3D, null);
                 wrapperInstalled = installedVersion != null;
             }
             wrapperInstalled = wrapperInstalled && areWindowsDllsPresent(
@@ -1075,7 +1075,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         String installedVkd3dVersion = GeneralComponents.extractFileResolvedVersion(
-            GeneralComponents.Type.VKD3D, this, vkd3dVersion, DefaultVersion.VKD3D);
+            GeneralComponents.Type.VKD3D, this, vkd3dVersion, DefaultVersion.VKD3D, null);
         boolean vkd3dInstalled = installedVkd3dVersion != null &&
             areWindowsDllsPresent("d3d12.dll");
 
