@@ -36,6 +36,10 @@ public class WineInstallerTest {
         return file;
     }
 
+    private File createX86_64Elf(File file) throws IOException {
+        return createElf(file, 2, 62);
+    }
+
     private File createAarch64Elf(File file) throws IOException {
         return createElf(file, 2, 183);
     }
@@ -81,17 +85,26 @@ public class WineInstallerTest {
     @Test
     public void chooses64BitWineWhenWine64FileIsActually32Bit() throws IOException {
         File root = temporaryFolder.getRoot();
-        File wine = createAarch64Elf(new File(root, "bin/wine"));
+        File wine = createX86_64Elf(new File(root, "bin/wine"));
         createArm32Elf(new File(root, "bin/wine64"));
 
         assertEquals(wine, WineInstaller.findWineExecutable(root));
     }
 
     @Test
-    public void rejectsX8664WineEvenThoughItIsA64BitElf() throws IOException {
+    public void acceptsX8664WineAndPrefersWine64() throws IOException {
         File root = temporaryFolder.getRoot();
-        createElf(new File(root, "bin/wine"), 2, 62);
-        createElf(new File(root, "bin/wine64"), 2, 62);
+        createX86_64Elf(new File(root, "bin/wine"));
+        File wine64 = createX86_64Elf(new File(root, "bin/wine64"));
+
+        assertEquals(wine64, WineInstaller.findWineExecutable(root));
+    }
+
+    @Test
+    public void rejectsAarch64WineBecauseWineRunsThroughBox64() throws IOException {
+        File root = temporaryFolder.getRoot();
+        createAarch64Elf(new File(root, "bin/wine"));
+        createAarch64Elf(new File(root, "bin/wine64"));
 
         assertNull(WineInstaller.findWineExecutable(root));
     }
