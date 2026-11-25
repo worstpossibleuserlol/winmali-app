@@ -7,6 +7,7 @@ import android.system.ErrnoException;
 import android.system.Os;
 
 import com.winlator.R;
+import com.winlator.XServerDisplayActivity;
 import com.winlator.core.Callback;
 import com.winlator.core.CompatibilityRuntimePackage;
 import com.winlator.core.FileUtils;
@@ -214,15 +215,22 @@ public class ContainerManager {
 
     public void removeContainerAsync(Container container, Callback<Boolean> callback) {
         final Handler handler = new Handler(context.getMainLooper());
-        OPERATIONS.execute(() -> {
-            boolean removed = false;
-            try {
-                removed = removeContainer(container);
-            }
-            catch (RuntimeException ignored) {}
-            final boolean result = removed;
-            if (callback != null) handler.post(() -> callback.call(result));
-        });
+        int containerId = container != null ? container.id : -1;
+
+        // Stop Wine/Box64 before removing its prefix, then delete on the worker.
+        XServerDisplayActivity.stopContainerSession(containerId, () ->
+            OPERATIONS.execute(() -> {
+                boolean removed = false;
+                try {
+                    removed = removeContainer(container);
+                }
+                catch (RuntimeException error) {
+                    android.util.Log.e("WinMali-Containers", "Container removal failed", error);
+                }
+                final boolean result = removed;
+                if (callback != null) handler.post(() -> callback.call(result));
+            })
+        );
     }
 
     public void exportContainerAsync(Container container, Uri destinationUri, Callback<Boolean> callback) {
@@ -577,9 +585,10 @@ public class ContainerManager {
     }
 
     private synchronized boolean removeContainer(Container container) {
-        if (!isManagedContainerDirectory(container) || getContainerById(container.id) == null ||
-            isActiveContainer(container)) return false;
+        if (!isManagedContainerDirectory(container) || getContainerById(container.id) == null) return false;
 
+        // Clear a stale active marker/symlink after the live session has stopped.
+        deactivateContainer(container);
         if (FileUtils.delete(container.getRootDir())) {
             containers.remove(container);
             return true;
