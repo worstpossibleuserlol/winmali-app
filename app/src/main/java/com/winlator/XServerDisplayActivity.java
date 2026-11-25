@@ -1105,23 +1105,40 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     }
 
     /**
-     * Upgrade containers that stored the old WineD3D defaults on Mali.
-     * Explicit non-default custom choices are kept unchanged.
+     * Keep Mali WineD3D on the OpenGL/FBO compatibility path by default.
+     * Version 2 of this migration forced Vulkan/backbuffer, which can fail
+     * on some Mali Vulkan paths. Revert only that exact automatically-written
+     * pair; other explicit renderer/offscreen choices remain untouched.
      */
     private boolean migrateLegacyMaliWineD3DDefaults() {
         if (!dxwrapper.equals(DXWrappers.WINED3D) || !GraphicsDrivers.isMaliGPU(this) ||
-            container.getExtra("maliD3DDefaultsVersion").equals("2")) return false;
+            container.getExtra("maliD3DDefaultsVersion").equals("3")) return false;
 
+        String migrationVersion = container.getExtra("maliD3DDefaultsVersion");
         String renderer = dxwrapperConfig[0].get("renderer");
         String offscreenMode = dxwrapperConfig[0].get("OffscreenRenderingMode");
-        boolean legacyRenderer = renderer.isEmpty() || renderer.equalsIgnoreCase("gl");
-        boolean legacyOffscreenMode = offscreenMode.isEmpty() || offscreenMode.equalsIgnoreCase("fbo");
-        if (!legacyRenderer || !legacyOffscreenMode) return false;
 
-        dxwrapperConfig[0].put("renderer", "vulkan");
-        dxwrapperConfig[0].put("OffscreenRenderingMode", "backbuffer");
-        container.setDXWrapperConfig(dxwrapperConfig[0].toString()+"|"+dxwrapperConfig[1].toString());
-        container.putExtra("maliD3DDefaultsVersion", "2");
+        boolean defaultsWereAutoMigratedToVulkan =
+            migrationVersion.equals("2") &&
+            renderer.equalsIgnoreCase("vulkan") &&
+            offscreenMode.equalsIgnoreCase("backbuffer");
+        boolean oldOpenGLDefaults =
+            (renderer.isEmpty() || renderer.equalsIgnoreCase("gl")) &&
+            (offscreenMode.isEmpty() || offscreenMode.equalsIgnoreCase("fbo"));
+
+        if (defaultsWereAutoMigratedToVulkan || oldOpenGLDefaults) {
+            dxwrapperConfig[0].put("renderer", "gl");
+            dxwrapperConfig[0].put("OffscreenRenderingMode", "fbo");
+            container.setDXWrapperConfig(dxwrapperConfig[0].toString()+"|"+dxwrapperConfig[1].toString());
+            android.util.Log.i("WinMali-D3D",
+                "Using WineD3D OpenGL/FBO compatibility defaults for Mali");
+        }
+        else {
+            android.util.Log.i("WinMali-D3D",
+                "Preserving explicitly configured Mali WineD3D renderer and offscreen mode");
+        }
+
+        container.putExtra("maliD3DDefaultsVersion", "3");
         return true;
     }
 
