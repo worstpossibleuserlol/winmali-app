@@ -1106,9 +1106,9 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
 
     /**
      * Keep Mali WineD3D on the OpenGL/FBO compatibility path by default.
-     * Version 2 of this migration forced Vulkan/backbuffer, which can fail
-     * on some Mali Vulkan paths. Revert only that exact automatically-written
-     * pair; other explicit renderer/offscreen choices remain untouched.
+     * Earlier WinMali defaults and migration version 2 used Vulkan/backbuffer.
+     * Restore the compatibility defaults for that exact pair; other custom
+     * renderer/offscreen combinations remain untouched.
      */
     private boolean migrateLegacyMaliWineD3DDefaults() {
         if (!dxwrapper.equals(DXWrappers.WINED3D) || !GraphicsDrivers.isMaliGPU(this) ||
@@ -1118,15 +1118,15 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         String renderer = dxwrapperConfig[0].get("renderer");
         String offscreenMode = dxwrapperConfig[0].get("OffscreenRenderingMode");
 
-        boolean defaultsWereAutoMigratedToVulkan =
-            migrationVersion.equals("2") &&
+        boolean legacyMaliVulkanDefaults =
+            (migrationVersion.isEmpty() || migrationVersion.equals("2")) &&
             renderer.equalsIgnoreCase("vulkan") &&
             offscreenMode.equalsIgnoreCase("backbuffer");
         boolean oldOpenGLDefaults =
             (renderer.isEmpty() || renderer.equalsIgnoreCase("gl")) &&
             (offscreenMode.isEmpty() || offscreenMode.equalsIgnoreCase("fbo"));
 
-        if (defaultsWereAutoMigratedToVulkan || oldOpenGLDefaults) {
+        if (legacyMaliVulkanDefaults || oldOpenGLDefaults) {
             dxwrapperConfig[0].put("renderer", "gl");
             dxwrapperConfig[0].put("OffscreenRenderingMode", "fbo");
             container.setDXWrapperConfig(dxwrapperConfig[0].toString()+"|"+dxwrapperConfig[1].toString());
