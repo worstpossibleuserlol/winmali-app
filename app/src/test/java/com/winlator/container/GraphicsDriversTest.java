@@ -34,6 +34,18 @@ public class GraphicsDriversTest {
     }
 
     @Test
+    public void usesVulkanAndBackbufferForMaliWineD3D() {
+        assertEquals("vulkan", GraphicsDrivers.getDefaultWineD3DRenderer(true));
+        assertEquals("backbuffer", GraphicsDrivers.getDefaultWineD3DOffscreenRenderingMode(true));
+    }
+
+    @Test
+    public void keepsOpenGLAndFboDefaultsForNonMaliWineD3D() {
+        assertEquals("gl", GraphicsDrivers.getDefaultWineD3DRenderer(false));
+        assertEquals("fbo", GraphicsDrivers.getDefaultWineD3DOffscreenRenderingMode(false));
+    }
+
+    @Test
     public void preservesLegacySingleDriverSelections() {
         assertArrayEquals(new String[]{GraphicsDrivers.TURNIP, GraphicsDrivers.DEFAULT_OPENGL_DRIVER},
             GraphicsDrivers.parseIdentifiers("turnip"));
