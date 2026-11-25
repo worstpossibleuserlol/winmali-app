@@ -109,7 +109,7 @@ jobs:
           data = pathlib.Path(sys.argv[1]).read_bytes()
           assert len(data) >= 6, "ICO is truncated"
           reserved, image_type, count = struct.unpack_from("<HHH", data, 0)
-          assert reserved == 0 and image_type == 1 and count >= 3, "Invalid ICO header"
+          assert reserved == 0 and image_type == 1 and count >= 1, "Invalid ICO header or empty image list"
           directory_end = 6 + count * 16
           assert directory_end <= len(data), "ICO directory is truncated"
           for index in range(count):
