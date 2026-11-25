@@ -29,7 +29,11 @@ public abstract class WineStartMenuCreator {
         if (!installerDir.isDirectory() && !installerDir.mkdirs()) return false;
 
         File installerScript = new File(installerDir, "EpicGamesLauncherInstaller.js");
-        return FileUtils.copy(context, "epic_launcher_installer.js", installerScript);
+        File installerIcon = new File(installerDir, "EpicGamesLauncher.ico");
+        return FileUtils.copy(context, "epic_launcher_installer.js", installerScript) &&
+            FileUtils.copy(context, "epic_games_launcher.ico", installerIcon) &&
+            installerScript.isFile() && installerScript.length() > 0 &&
+            installerIcon.isFile() && installerIcon.length() > 0;
     }
 
     private static void createMenuEntry(JSONObject item, File currentDir, boolean epicInstallerReady) throws JSONException {

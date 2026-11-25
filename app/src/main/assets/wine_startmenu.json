@@ -87,6 +87,7 @@
                         "name" : "Epic Games Launcher",
                         "path" : "C:/windows/system32/wscript.exe",
                         "cmdArgs" : "\"C:/ProgramData/WinMali/EpicGamesLauncherInstaller.js\"",
+                        "iconLocation" : "C:/ProgramData/WinMali/EpicGamesLauncher.ico",
                         "installer" : "epic-games-launcher"
                     }
                 ]
