@@ -99,6 +99,25 @@ jobs:
           test -s "$RUNNER_TEMP/common_dlls.json"
           python -m json.tool "$RUNNER_TEMP/common_dlls.json" > /dev/null
 
+          unzip -p "$APK" assets/epic_games_launcher.ico > "$RUNNER_TEMP/epic_games_launcher.ico"
+          test -s "$RUNNER_TEMP/epic_games_launcher.ico"
+          python - "$RUNNER_TEMP/epic_games_launcher.ico" <<'PY'
+          import pathlib
+          import struct
+          import sys
+
+          data = pathlib.Path(sys.argv[1]).read_bytes()
+          assert len(data) >= 6, "ICO is truncated"
+          reserved, image_type, count = struct.unpack_from("<HHH", data, 0)
+          assert reserved == 0 and image_type == 1 and count >= 3, "Invalid ICO header"
+          directory_end = 6 + count * 16
+          assert directory_end <= len(data), "ICO directory is truncated"
+          for index in range(count):
+              entry = struct.unpack_from("<BBBBHHII", data, 6 + index * 16)
+              size, offset = entry[6], entry[7]
+              assert size > 0 and offset >= directory_end and offset + size <= len(data), "Invalid ICO image entry"
+          PY
+
       - name: Upload WinMali 2.0.0 APK
         uses: actions/upload-artifact@v4
         with:
