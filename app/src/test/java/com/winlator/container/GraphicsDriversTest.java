@@ -35,9 +35,9 @@ public class GraphicsDriversTest {
     }
 
     @Test
-    public void usesVulkanAndBackbufferForMaliWineD3D() {
-        assertEquals("vulkan", GraphicsDrivers.getDefaultWineD3DRenderer(true));
-        assertEquals("backbuffer", GraphicsDrivers.getDefaultWineD3DOffscreenRenderingMode(true));
+    public void usesOpenGLAndFboForMaliWineD3D() {
+        assertEquals("gl", GraphicsDrivers.getDefaultWineD3DRenderer(true));
+        assertEquals("fbo", GraphicsDrivers.getDefaultWineD3DOffscreenRenderingMode(true));
     }
 
     @Test
