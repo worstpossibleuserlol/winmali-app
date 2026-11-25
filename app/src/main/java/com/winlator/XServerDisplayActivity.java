@@ -103,6 +103,9 @@ import java.util.Iterator;
 import java.util.concurrent.Executors;
 
 public class XServerDisplayActivity extends AppCompatActivity implements NavigationView.OnNavigationItemSelectedListener {
+    private static volatile XServerDisplayActivity activeSessionActivity;
+    private final ArrayList<Runnable> pendingContainerRemovalCallbacks = new ArrayList<>();
+
     private XServerView xServerView;
     private InputControlsView inputControlsView;
     private TouchpadView touchpadView;
@@ -137,6 +140,28 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     public int frameRatingWindowId = -1;
     private Win32AppWorkarounds win32AppWorkarounds;
     private String screenEffectProfile;
+
+    /**
+     * Stops a live Wine/Box64 session before its container files are deleted.
+     * The callback runs after the environment and active-container link stop.
+     */
+    public static void stopContainerSession(int containerId, Runnable onStopped) {
+        XServerDisplayActivity activity = activeSessionActivity;
+        if (activity == null || activity.container == null ||
+            activity.container.id != containerId || activity.isDestroyed()) {
+            if (onStopped != null) onStopped.run();
+            return;
+        }
+
+        activity.runOnUiThread(() -> {
+            if (activeSessionActivity != activity || activity.isDestroyed()) {
+                if (onStopped != null) onStopped.run();
+                return;
+            }
+            if (onStopped != null) activity.pendingContainerRemovalCallbacks.add(onStopped);
+            if (!activity.isFinishing()) activity.finish();
+        });
+    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -173,6 +198,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                 finish();
                 return;
             }
+            activeSessionActivity = this;
 
             boolean wineprefixNeedsUpdate = container.getExtra("wineprefixNeedsUpdate").equals("t");
             if (wineprefixNeedsUpdate) {
@@ -361,8 +387,13 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         winHandler.stop();
         if (environment != null) environment.stopEnvironmentComponents();
         if (containerManager != null && container != null) containerManager.deactivateContainer(container);
+        if (activeSessionActivity == this) activeSessionActivity = null;
         ForegroundService.stopSession(this);
         super.onDestroy();
+
+        ArrayList<Runnable> callbacks = new ArrayList<>(pendingContainerRemovalCallbacks);
+        pendingContainerRemovalCallbacks.clear();
+        for (Runnable callback : callbacks) callback.run();
     }
 
     @Override
@@ -484,12 +515,25 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         if (verifyUserRegistry()) containerDataChanged = true;
-        if (extractDXWrapperFiles()) containerDataChanged = true;
+        int dxWrapperStatus = extractDXWrapperFiles();
+        if (dxWrapperStatus < 0) {
+            android.util.Log.e("WinMali-D3D", "Direct3D wrapper installation failed; refusing to launch with incomplete DLLs");
+            return false;
+        }
+        if (dxWrapperStatus > 0) containerDataChanged = true;
 
         if (!wincomponents.equals(container.getExtra("wincomponents"))) {
-            extractWinComponentFiles();
+            if (!extractWinComponentFiles()) {
+                android.util.Log.e("WinMali-D3D", "Windows component installation failed");
+                return false;
+            }
             container.putExtra("wincomponents", wincomponents);
             containerDataChanged = true;
+        }
+
+        if (!hasRequiredD3DWrapperFiles()) {
+            android.util.Log.e("WinMali-D3D", "Required Direct3D DLLs are missing from the active Wine prefix");
+            return false;
         }
 
         String desktopTheme = container.getDesktopTheme();
@@ -933,87 +977,138 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         return inputControlsView;
     }
 
-    private boolean extractDXWrapperFiles() {
+    /**
+     * @return 1 when files were installed, 0 when the cached installation is
+     * already complete, or -1 when the selected wrapper could not be installed.
+     */
+    private int extractDXWrapperFiles() {
         String cacheId = "";
+        String dxvkVersion = dxwrapperConfig[0].get("version");
+        if (dxvkVersion.isEmpty()) dxvkVersion = DefaultVersion.DXVK(graphicsDriver[0]);
+
+        String wineD3DVersion = dxwrapperConfig[0].get("version");
+        if (wineD3DVersion.isEmpty()) wineD3DVersion = DefaultVersion.WINED3D;
+
         if (dxwrapper.equals(DXWrappers.DXVK)) {
             DXVKConfigDialog.setEnvVars(this, dxwrapperConfig[0], envVars);
-            cacheId += dxwrapper+"-"+dxwrapperConfig[0].get("version", DefaultVersion.DXVK(graphicsDriver[0]));
+            cacheId += dxwrapper+"-"+dxvkVersion;
         }
         else if (dxwrapper.equals(DXWrappers.WINED3D)) {
-            WineD3DConfigDialog.setEnvVars(dxwrapperConfig[0], envVars);
-            cacheId += dxwrapper+"-"+dxwrapperConfig[0].get("version", DefaultVersion.WINED3D);
+            WineD3DConfigDialog.setEnvVars(this, dxwrapperConfig[0], envVars);
+            cacheId += dxwrapper+"-"+wineD3DVersion;
+        }
+        else {
+            cacheId += dxwrapper;
         }
 
         String ddrawWrapper = dxwrapperConfig[0].get("ddrawWrapper", DXWrappers.WINED3D);
-        cacheId += "-"+DXWrappers.VKD3D+"-"+dxwrapperConfig[1].get("version", DefaultVersion.VKD3D)+"-"+ddrawWrapper;
+        String vkd3dVersion = dxwrapperConfig[1].get("version");
+        if (vkd3dVersion.isEmpty()) vkd3dVersion = DefaultVersion.VKD3D;
+        cacheId += "-"+DXWrappers.VKD3D+"-"+vkd3dVersion+"-"+ddrawWrapper;
         boolean changed = !cacheId.equals(container.getExtra("dxwrapper"));
         VKD3DConfigDialog.setEnvVars(dxwrapperConfig[1], envVars);
 
-        if (ddrawWrapper.equals(DXWrappers.CNC_DDRAW)) envVars.put("CNC_DDRAW_CONFIG_FILE", "C:\\ProgramData\\cnc-ddraw\\ddraw.ini");
+        if (ddrawWrapper.equals(DXWrappers.CNC_DDRAW)) {
+            envVars.put("CNC_DDRAW_CONFIG_FILE", "C:\\ProgramData\\cnc-ddraw\\ddraw.ini");
+        }
 
-        if (!changed) return false;
-        container.putExtra("dxwrapper", cacheId);
+        // Older builds could persist this marker before DLL extraction completed.
+        if (!changed && hasRequiredD3DWrapperFiles()) return 0;
 
         File rootDir = rootFS.getRootDir();
         File windowsDir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows");
 
-        if (dxwrapper.equals(DXWrappers.WINED3D)) {
-            String version = dxwrapperConfig[0].get("version", DefaultVersion.WINED3D);
-            if (version.equals(WineInfo.MAIN_WINE_VERSION)) {
-                final String[] dlls = {"d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll", "d3d10core.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll", "dxgi.dll", "ddraw.dll", "wined3d.dll"};
-                restoreBuiltinDllFiles(dlls);
+        if (dxwrapper.equals(DXWrappers.WINED3D) || dxwrapper.equals(DXWrappers.VKD3D)) {
+            if (dxwrapper.equals(DXWrappers.WINED3D) && wineD3DVersion.equals(WineInfo.MAIN_WINE_VERSION)) {
+                final String[] dlls = {"d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll",
+                    "d3d10core.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll",
+                    "dxgi.dll", "ddraw.dll", "wined3d.dll"};
+                if (!restoreBuiltinDllFiles(dlls)) return -1;
             }
-            else GeneralComponents.extractFile(GeneralComponents.Type.WINED3D, this, version, DefaultVersion.WINED3D);
+            else if (dxwrapper.equals(DXWrappers.WINED3D)) {
+                String installedVersion = GeneralComponents.extractFileResolvedVersion(
+                    GeneralComponents.Type.WINED3D, this, wineD3DVersion, DefaultVersion.WINED3D);
+                if (installedVersion == null) return -1;
+            }
+            else {
+                // VKD3D supplies D3D12; preserve Wine's D3D9 implementation too.
+                final String[] dlls = {"d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll",
+                    "d3d10core.dll", "d3d11.dll", "dxgi.dll", "ddraw.dll", "wined3d.dll"};
+                if (!restoreBuiltinDllFiles(dlls)) return -1;
+            }
         }
         else if (dxwrapper.equals(DXWrappers.DXVK)) {
             final boolean[] hasD3D8DllFile = {false};
             final boolean[] hasD3D10DllFile = {false};
 
-            GeneralComponents.extractFile(GeneralComponents.Type.DXVK, this, dxwrapperConfig[0].get("version"), DefaultVersion.DXVK(graphicsDriver[0]), (destination, size) -> {
-                String name = destination.getName();
-                if (name.equals("d3d10.dll")) {
-                    hasD3D10DllFile[0] = true;
-                }
-                else if (name.equals("d3d8.dll")) {
-                    hasD3D8DllFile[0] = true;
-                }
-                return destination;
-            });
+            String installedVersion = GeneralComponents.extractFileResolvedVersion(
+                GeneralComponents.Type.DXVK, this, dxvkVersion, DefaultVersion.DXVK(graphicsDriver[0]),
+                (destination, size) -> {
+                    String name = destination.getName();
+                    if (name.equals("d3d10.dll")) hasD3D10DllFile[0] = true;
+                    else if (name.equals("d3d8.dll")) hasD3D8DllFile[0] = true;
+                    return destination;
+                });
+            if (installedVersion == null) return -1;
 
-            if (!hasD3D8DllFile[0]) {
-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "dxwrapper/d8vk-"+DefaultVersion.D8VK+".tzst", windowsDir);
-            }
-            if (!hasD3D10DllFile[0]) restoreBuiltinDllFiles("d3d10.dll", "d3d10_1.dll");
+            if (!hasD3D8DllFile[0] &&
+                !TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
+                    "dxwrapper/d8vk-"+DefaultVersion.D8VK+".tzst", windowsDir)) return -1;
+            if (!hasD3D10DllFile[0] &&
+                !restoreBuiltinDllFiles("d3d10.dll", "d3d10_1.dll")) return -1;
         }
 
-        GeneralComponents.extractFile(GeneralComponents.Type.VKD3D, this, dxwrapperConfig[1].get("version"), DefaultVersion.VKD3D);
+        String installedVkd3d = GeneralComponents.extractFileResolvedVersion(
+            GeneralComponents.Type.VKD3D, this, vkd3dVersion, DefaultVersion.VKD3D);
+        if (installedVkd3d == null && dxwrapper.equals(DXWrappers.VKD3D)) return -1;
 
         File containerSysWoW64Dir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows/syswow64");
         FileUtils.delete(new File(containerSysWoW64Dir, "ddraw_.dll"));
 
         switch (ddrawWrapper) {
-            case DXWrappers.CNC_DDRAW:
+            case DXWrappers.CNC_DDRAW: {
                 final String assetDir = "dxwrapper/cnc-ddraw-"+DefaultVersion.CNC_DDRAW;
                 File configFile = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/ProgramData/cnc-ddraw/ddraw.ini");
-                if (!configFile.isFile()) FileUtils.copy(this, assetDir+"/ddraw.ini", configFile);
+                if (!configFile.isFile() && !FileUtils.copy(this, assetDir+"/ddraw.ini", configFile)) return -1;
                 File shadersDir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/ProgramData/cnc-ddraw/Shaders");
                 FileUtils.delete(shadersDir);
-                FileUtils.copy(this, assetDir+"/Shaders", shadersDir);
-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, assetDir+"/ddraw.tzst", windowsDir);
+                if (!FileUtils.copy(this, assetDir+"/Shaders", shadersDir) ||
+                    !TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, assetDir+"/ddraw.tzst", windowsDir)) return -1;
                 break;
+            }
             case DXWrappers.D7VK:
-                restoreBuiltinDllFiles("ddraw.dll");
+                if (!restoreBuiltinDllFiles("ddraw.dll")) return -1;
                 (new File(containerSysWoW64Dir, "ddraw.dll")).renameTo(new File(containerSysWoW64Dir, "ddraw_.dll"));
-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "dxwrapper/d7vk-"+DefaultVersion.D7VK+".tzst", windowsDir);
+                if (!TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
+                    "dxwrapper/d7vk-"+DefaultVersion.D7VK+".tzst", windowsDir)) return -1;
                 break;
             default:
-                restoreBuiltinDllFiles("ddraw.dll");
+                if (!restoreBuiltinDllFiles("ddraw.dll")) return -1;
                 break;
+        }
+
+        if (!hasRequiredD3DWrapperFiles()) return -1;
+        container.putExtra("dxwrapper", cacheId);
+        return 1;
+    }
+
+    private boolean hasRequiredD3DWrapperFiles() {
+        File windowsDir = new File(rootFS.getRootDir(), RootFS.WINEPREFIX+"/drive_c/windows");
+        File[] architectureDirs = {new File(windowsDir, "system32"), new File(windowsDir, "syswow64")};
+        String[] requiredDlls = dxwrapper.equals(DXWrappers.DXVK) ?
+            new String[]{"d3d9.dll", "dxgi.dll"} :
+            new String[]{"d3d9.dll", "wined3d.dll"};
+
+        for (File architectureDir : architectureDirs) {
+            for (String dll : requiredDlls) {
+                File file = new File(architectureDir, dll);
+                if (!file.isFile() || file.length() == 0) return false;
+            }
         }
         return true;
     }
 
-    private void extractWinComponentFiles() {
+    private boolean extractWinComponentFiles() {
         File rootDir = rootFS.getRootDir();
         File windowsDir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows");
         File systemRegFile = new File(rootDir, RootFS.WINEPREFIX+"/system.reg");
@@ -1029,7 +1124,8 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                 boolean useNative = wincomponent[1].equals("1");
 
                 if (useNative) {
-                    TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "wincomponents/"+identifier+".tzst", windowsDir);
+                    if (!TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
+                        "wincomponents/"+identifier+".tzst", windowsDir)) return false;
                 }
                 else {
                     JSONObject wincomponentJSONObject = wincomponentsJSONObject.getJSONObject(identifier);
@@ -1041,35 +1137,55 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                         }
                     }
                     else {
-                        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "wincomponents/"+identifier+".tzst", windowsDir, (destination, size) -> {
-                            String name = destination.getName();
-                            if (name.endsWith(".dll") || name.endsWith(".manifest") || name.endsWith("_deadbeef")) FileUtils.delete(destination);
-                            return null;
-                        });
+                        if (!TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
+                            "wincomponents/"+identifier+".tzst", windowsDir, (destination, size) -> {
+                                String name = destination.getName();
+                                if (name.endsWith(".dll") || name.endsWith(".manifest") || name.endsWith("_deadbeef")) FileUtils.delete(destination);
+                                return null;
+                            })) return false;
                     }
                 }
 
                 WineUtils.setWinComponentRegistryKeys(systemRegFile, identifier, useNative);
             }
 
-            if (!builtinDlls.isEmpty()) restoreBuiltinDllFiles(builtinDlls.toArray(new String[0]));
+            if (!builtinDlls.isEmpty() && !restoreBuiltinDllFiles(builtinDlls.toArray(new String[0]))) return false;
             WineUtils.overrideWinComponentDlls(this, container, wincomponents);
+            return true;
         }
-        catch (JSONException e) {}
+        catch (JSONException | RuntimeException error) {
+            android.util.Log.e("WinMali-D3D", "Unable to install Windows components", error);
+            return false;
+        }
     }
 
-    private void restoreBuiltinDllFiles(final String... dlls) {
+    private boolean restoreBuiltinDllFiles(final String... dlls) {
         File rootDir = rootFS.getRootDir();
         File wineDir = new File(rootDir, rootFS.getWinePath());
-        File wineSystem32Dir = new File(wineDir, "/lib/wine/x86_64-windows");
-        File wineSysWoW64Dir = new File(wineDir, "/lib/wine/i386-windows");
+        File wineSystem32Dir = new File(wineDir, "lib/wine/x86_64-windows");
+        File wineSysWoW64Dir = new File(wineDir, "lib/wine/i386-windows");
         File containerSystem32Dir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows/system32");
-        File containerSysWoW64Dir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows/syswow64");;
+        File containerSysWoW64Dir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows/syswow64");
 
+        boolean success = true;
         for (String dll : dlls) {
-            FileUtils.copy(new File(wineSysWoW64Dir, dll), new File(containerSysWoW64Dir, dll));
-            FileUtils.copy(new File(wineSystem32Dir, dll), new File(containerSystem32Dir, dll));
+            File source32 = new File(wineSysWoW64Dir, dll);
+            File target32 = new File(containerSysWoW64Dir, dll);
+            if (source32.isFile() &&
+                (!FileUtils.copy(source32, target32) || !target32.isFile() || target32.length() == 0)) {
+                success = false;
+                android.util.Log.e("WinMali-D3D", "Failed to restore 32-bit Wine DLL: "+dll);
+            }
+
+            File source64 = new File(wineSystem32Dir, dll);
+            File target64 = new File(containerSystem32Dir, dll);
+            if (source64.isFile() &&
+                (!FileUtils.copy(source64, target64) || !target64.isFile() || target64.length() == 0)) {
+                success = false;
+                android.util.Log.e("WinMali-D3D", "Failed to restore 64-bit Wine DLL: "+dll);
+            }
         }
+        return success;
     }
 
     private boolean isGenerateWineprefix() {
