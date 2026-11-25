@@ -94,7 +94,7 @@ public class RootFSTest {
         File wine = new File(temporaryFolder.getRoot(), "opt/wine");
         assertTrue(new File(wine, "bin").mkdirs());
         prepareWineLibraries(wine);
-        Files.write(new File(wine, "bin/wine").toPath(), aarch64ElfHeader());
+        Files.write(new File(wine, "bin/wine").toPath(), x86_64ElfHeader());
         assertTrue(RootFS.hasCoreWineFiles(temporaryFolder.getRoot()));
     }
 
@@ -103,7 +103,7 @@ public class RootFSTest {
         File wine = new File(temporaryFolder.getRoot(), "opt/wine");
         assertTrue(new File(wine, "bin").mkdirs());
         prepareWineLibraries(wine);
-        Files.write(new File(wine, "bin/wine64").toPath(), aarch64ElfHeader());
+        Files.write(new File(wine, "bin/wine64").toPath(), x86_64ElfHeader());
         assertTrue(RootFS.hasCoreWineFiles(temporaryFolder.getRoot()));
     }
 }
