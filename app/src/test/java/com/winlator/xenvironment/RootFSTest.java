@@ -11,7 +11,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class RootFSTest {
-    private static byte[] aarch64ElfHeader() {
+    private static byte[] x86_64ElfHeader() {
         byte[] header = new byte[20];
         header[0] = 0x7f;
         header[1] = 'E';
@@ -19,7 +19,7 @@ public class RootFSTest {
         header[3] = 'F';
         header[4] = 2;
         header[5] = 1;
-        header[18] = (byte)183;
+        header[18] = 62; // EM_X86_64
         return header;
     }
 
@@ -74,7 +74,18 @@ public class RootFSTest {
         File x64 = new File(wine, "lib/wine/x86_64-windows");
         assertTrue(x64.mkdirs());
         Files.write(new File(x64, "kernel32.dll").toPath(), new byte[]{1});
-        Files.write(new File(wine, "bin/wine").toPath(), aarch64ElfHeader());
+        Files.write(new File(wine, "bin/wine").toPath(), x86_64ElfHeader());
+        assertFalse(RootFS.hasCoreWineFiles(temporaryFolder.getRoot()));
+    }
+
+    @Test
+    public void rejectsAarch64WineBecauseBox64RequiresX86_64Wine() throws Exception {
+        File wine = new File(temporaryFolder.getRoot(), "opt/wine");
+        assertTrue(new File(wine, "bin").mkdirs());
+        prepareWineLibraries(wine);
+        byte[] header = x86_64ElfHeader();
+        header[18] = (byte)183; // EM_AARCH64
+        Files.write(new File(wine, "bin/wine").toPath(), header);
         assertFalse(RootFS.hasCoreWineFiles(temporaryFolder.getRoot()));
     }
 
