@@ -1106,9 +1106,9 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
 
     /**
      * Keep Mali WineD3D on the OpenGL/FBO compatibility path by default.
-     * Earlier WinMali defaults and migration version 2 used Vulkan/backbuffer.
-     * Restore the compatibility defaults for that exact pair; other custom
-     * renderer/offscreen combinations remain untouched.
+     * Mali's compatibility path uses WineD3D OpenGL with backbuffer rendering.
+     * Replace the previous Vulkan/backbuffer and legacy OpenGL/FBO defaults;
+     * other custom renderer/offscreen combinations remain untouched.
      */
     private boolean migrateLegacyMaliWineD3DDefaults() {
         if (!dxwrapper.equals(DXWrappers.WINED3D) || !GraphicsDrivers.isMaliGPU(this) ||
@@ -1128,7 +1128,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
 
         if (legacyMaliVulkanDefaults || oldOpenGLDefaults) {
             dxwrapperConfig[0].put("renderer", "gl");
-            dxwrapperConfig[0].put("OffscreenRenderingMode", "fbo");
+            dxwrapperConfig[0].put("OffscreenRenderingMode", "backbuffer");
             container.setDXWrapperConfig(dxwrapperConfig[0].toString()+"|"+dxwrapperConfig[1].toString());
             android.util.Log.i("WinMali-D3D",
                 "Using WineD3D OpenGL/FBO compatibility defaults for Mali");
