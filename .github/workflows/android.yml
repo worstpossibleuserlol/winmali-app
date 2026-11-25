@@ -521,6 +521,66 @@ jobs:
               assert size > 0 and offset >= directory_end and offset + size <= len(data), "Invalid ICO image entry"
           PY
 
+      - name: Verify first-party native libraries use 16 KB ELF alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/WinMali_2.0.0.apk
+          LLVM_READelf="$ANDROID_HOME/ndk/24.0.8215888/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          test -x "$LLVM_READelf"
+          for name in \
+            libwinlator.so \
+            libvortekrenderer.so \
+            libvirglrenderer.so \
+            libgladiorenderer.so \
+            libmidihandler.so \
+            libfile_redirect_hook.so \
+            libgsl_alloc_hook.so \
+            libhook_impl.so \
+            libmain_hook.so; do
+            path="$RUNNER_TEMP/$name"
+            unzip -p "$APK" "lib/arm64-v8a/$name" > "$path"
+            test -s "$path"
+            "$LLVM_READelf" -lW "$path" | python -c '
+          import sys
+          alignments = [
+              int(line.split()[-1], 16)
+              for line in sys.stdin
+              if line.strip().startswith("LOAD ")
+          ]
+          assert alignments, "ELF has no LOAD segments"
+          assert all(value >= 16384 and value % 16384 == 0 for value in alignments), alignments
+          print("16 KB ELF alignment:", alignments)
+          '
+          done
+
+      - name: Launch WinMali on an Android 15 16 KB emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis_ps16k
+          arch: x86_64
+          profile: pixel_5
+          emulator-boot-timeout: 600
+          script: |
+            set -euo pipefail
+            APK=app/build/outputs/apk/debug/WinMali_2.0.0.apk
+            PAGE_SIZE="$(adb shell getconf PAGE_SIZE | tr -d '\\r')"
+            echo "Emulator page size: $PAGE_SIZE"
+            test "$PAGE_SIZE" = "16384"
+            adb install -r "$APK"
+            adb logcat -c
+            adb shell am force-stop com.winlator
+            adb shell am start -W -n com.winlator/com.winlator.MainActivity
+            sleep 15
+            if ! adb shell pidof com.winlator >/dev/null; then
+              adb logcat -d -t 3000
+              echo "WinMali process exited after launcher startup" >&2
+              exit 1
+            fi
+            adb logcat -d -t 1200 | grep -E "WinMali|FATAL EXCEPTION|Fatal signal|linker" || true
+            echo "WinMali launcher remained alive on the 16 KB emulator."
+
       - name: Upload WinMali 2.0.0 APK
         uses: actions/upload-artifact@v4
         with:

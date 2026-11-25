@@ -76,8 +76,15 @@ public abstract class RootFSInstaller {
 
     public static boolean isReady(Context context) {
         if (context == null) return false;
-        RootFS rootFS = RootFS.find(context);
-        return rootFS.isValid() && rootFS.getVersion() >= LATEST_VERSION;
+        try {
+            RootFS rootFS = RootFS.find(context);
+            return rootFS != null && rootFS.isValid() && rootFS.getVersion() >= LATEST_VERSION;
+        }
+        catch (RuntimeException error) {
+            // A damaged or inaccessible old RootFS must not crash MainActivity during launch.
+            android.util.Log.e("WinMali-RootFS", "Unable to inspect the installed RootFS; scheduling recovery", error);
+            return false;
+        }
     }
 
     public static boolean isInstalling() {
@@ -334,14 +341,19 @@ public abstract class RootFSInstaller {
     }
 
     private static boolean installNow(Context context, Activity activity, DownloadProgressDialog dialog) {
-        RootFS rootFS = RootFS.find(context);
-        final File rootDir = rootFS.getRootDir();
-        final File parentDir = rootDir.getAbsoluteFile().getParentFile();
-
+        File rootDir = null;
+        File parentDir = null;
         File stagingDir = null;
         File backupDir = null;
         boolean success = false;
         try {
+            RootFS rootFS = RootFS.find(context);
+            if (rootFS == null || rootFS.getRootDir() == null) {
+                throw new java.io.IOException("Unable to locate the RootFS directory");
+            }
+            rootDir = rootFS.getRootDir();
+            parentDir = rootDir.getAbsoluteFile().getParentFile();
+
             if (!hasValidRootFSAsset(context)) {
                 throw new java.io.IOException("Bundled rootfs.tzst is missing or is not a Zstandard archive");
             }
@@ -428,7 +440,8 @@ public abstract class RootFSInstaller {
         }
         finally {
             if (stagingDir != null && stagingDir.exists()) FileUtils.delete(stagingDir);
-            if (!success && backupDir != null && backupDir.exists() && !rootDir.exists()) {
+            if (!success && backupDir != null && backupDir.exists() &&
+                rootDir != null && !rootDir.exists()) {
                 backupDir.renameTo(rootDir);
             }
             if (dialog != null) dialog.closeOnUiThread();
