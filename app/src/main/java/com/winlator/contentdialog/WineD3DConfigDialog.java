@@ -8,6 +8,7 @@ import android.widget.Spinner;
 
 import com.winlator.R;
 import com.winlator.container.DXWrappers;
+import com.winlator.container.GraphicsDrivers;
 import com.winlator.core.AppUtils;
 import com.winlator.core.DefaultVersion;
 import com.winlator.core.EnvVars;
@@ -37,7 +38,9 @@ public class WineD3DConfigDialog extends ContentDialog {
         GeneralComponents.initViews(GeneralComponents.Type.WINED3D, findViewById(R.id.WineD3DToolbox), sVersion, version, DefaultVersion.WINED3D);
 
         AppUtils.setSpinnerSelectionFromIdentifier(sDDrawWrapper, config.get("ddrawWrapper", DXWrappers.WINED3D));
-        AppUtils.setSpinnerSelectionFromIdentifier(sRenderer, config.get("renderer", "gl"));
+        boolean isMaliGpu = GraphicsDrivers.isMaliGPU(context);
+        String defaultRenderer = GraphicsDrivers.getDefaultWineD3DRenderer(isMaliGpu);
+        AppUtils.setSpinnerSelectionFromIdentifier(sRenderer, config.get("renderer", defaultRenderer));
 
         final CheckBox cbCSMT = findViewById(R.id.CBCSMT);
         cbCSMT.setChecked(config.getInt("csmt", 3) != 0);
@@ -50,7 +53,9 @@ public class WineD3DConfigDialog extends ContentDialog {
         List<String> offscreenRenderingModeList = Arrays.asList("Backbuffer", "FBO");
         final Spinner sOffscreenRenderingMode = findViewById(R.id.SOffscreenRenderingMode);
         sOffscreenRenderingMode.setAdapter(new ArrayAdapter<>(context, android.R.layout.simple_spinner_dropdown_item, offscreenRenderingModeList));
-        AppUtils.setSpinnerSelectionFromValue(sOffscreenRenderingMode, config.get("OffscreenRenderingMode", "fbo"));
+        String defaultOffscreenMode = GraphicsDrivers.getDefaultWineD3DOffscreenRenderingMode(isMaliGpu);
+        AppUtils.setSpinnerSelectionFromValue(sOffscreenRenderingMode,
+            config.get("OffscreenRenderingMode", defaultOffscreenMode));
 
         final CheckBox cbStrictShaderMath = findViewById(R.id.CBStrictShaderMath);
         cbStrictShaderMath.setChecked(config.getInt("strict_shader_math", 1) != 0);
@@ -81,13 +86,16 @@ public class WineD3DConfigDialog extends ContentDialog {
         });
     }
 
-    public static void setEnvVars(KeyValueSet config, EnvVars envVars) {
+    public static void setEnvVars(Context context, KeyValueSet config, EnvVars envVars) {
+        boolean isMaliGpu = GraphicsDrivers.isMaliGPU(context);
+        String defaultRenderer = GraphicsDrivers.getDefaultWineD3DRenderer(isMaliGpu);
+        String defaultOffscreenMode = GraphicsDrivers.getDefaultWineD3DOffscreenRenderingMode(isMaliGpu);
         envVars.put("WINE_D3D_CONFIG", String.join(",",
-            "renderer="+config.get("renderer", "gl"),
+            "renderer="+config.get("renderer", defaultRenderer),
             "csmt="+config.getHexString("csmt", 3),
             "VideoPciDeviceID="+config.getHexString("VideoPciDeviceID", 1728),
             "VideoPciVendorID="+config.getHexString("VideoPciVendorID", 4318),
-            "OffscreenRenderingMode="+config.get("OffscreenRenderingMode", "fbo"),
+            "OffscreenRenderingMode="+config.get("OffscreenRenderingMode", defaultOffscreenMode),
             "strict_shader_math="+config.getHexString("strict_shader_math", 1),
             "VideoMemorySize="+config.get("VideoMemorySize", "2048")
         ));
