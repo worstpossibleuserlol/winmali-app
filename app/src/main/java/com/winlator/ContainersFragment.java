@@ -33,7 +33,7 @@ import com.winlator.container.ContainerManager;
 import com.winlator.contentdialog.ContentDialog;
 import com.winlator.contentdialog.StorageInfoDialog;
 import com.winlator.core.PreloaderDialog;
-import com.winlator.xenvironment.RootFS;
+import com.winlator.xenvironment.RootFSInstaller;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,6 +44,7 @@ public class ContainersFragment extends Fragment {
     private ContainerManager manager;
     private PreloaderDialog preloaderDialog;
     private static final int REQUEST_IMPORT_CONTAINER = 4101;
+    private boolean openingContainerEditor = false;
 
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
@@ -96,12 +97,23 @@ public class ContainersFragment extends Fragment {
             return true;
         }
         else if (menuItem.getItemId() == R.id.menu_item_add) {
-            if (!RootFS.find(getContext()).isValid()) return false;
-            FragmentManager fragmentManager = getParentFragmentManager();
-            fragmentManager.beginTransaction()
-                .addToBackStack(null)
-                .replace(R.id.FLFragmentContainer, new ContainerDetailFragment())
-                .commit();
+            if (openingContainerEditor || getContext() == null) return true;
+            openingContainerEditor = true;
+            RootFSInstaller.ensureInstalled(getContext(), (systemFilesReady) -> {
+                openingContainerEditor = false;
+                if (!isAdded() || !isResumed()) return;
+                if (!systemFilesReady) {
+                    Toast.makeText(getContext(), R.string.unable_to_install_system_files,
+                        Toast.LENGTH_LONG).show();
+                    return;
+                }
+
+                FragmentManager fragmentManager = getParentFragmentManager();
+                fragmentManager.beginTransaction()
+                    .addToBackStack(null)
+                    .replace(R.id.FLFragmentContainer, new ContainerDetailFragment())
+                    .commit();
+            });
             return true;
         }
         else return super.onOptionsItemSelected(menuItem);

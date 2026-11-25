@@ -272,12 +272,25 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         setupUI();
 
         Executors.newSingleThreadExecutor().execute(() -> {
+            boolean systemFilesReady = true;
             if (!isGenerateWineprefix()) {
-                setupWineSystemFiles();
-                extractGraphicsDriverFiles();
-                changeWineAudioDriver();
+                systemFilesReady = setupWineSystemFiles();
+                if (systemFilesReady) {
+                    extractGraphicsDriverFiles();
+                    changeWineAudioDriver();
+                }
             }
-            setupXEnvironment();
+
+            if (systemFilesReady) {
+                setupXEnvironment();
+            }
+            else {
+                runOnUiThread(() -> {
+                    preloaderDialog.closeOnUiThread();
+                    AppUtils.showToast(this, R.string.unable_to_install_system_files);
+                    finish();
+                });
+            }
         });
     }
 
@@ -432,7 +445,16 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         return preferences;
     }
 
+    private final java.util.concurrent.atomic.AtomicBoolean exitRequested =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+
     private void exit() {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            runOnUiThread(this::exit);
+            return;
+        }
+        if (!exitRequested.compareAndSet(false, true)) return;
+
         winHandler.stop();
         if (environment != null) environment.stopEnvironmentComponents();
 
@@ -447,14 +469,15 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         ForegroundService.stopSession(this);
     }
 
-    private void setupWineSystemFiles() {
+    private boolean setupWineSystemFiles() {
         String appVersion = String.valueOf(AppUtils.getVersionCode(this));
         String rfsVersion = String.valueOf(rootFS.getVersion());
         boolean containerDataChanged = false;
 
         boolean wineprefixWasUpdated = WineUtils.isWineprefixWasUpdated(container);
         if (!container.getExtra("appVersion").equals(appVersion) || !container.getExtra("rfsVersion").equals(rfsVersion) || wineprefixWasUpdated) {
-            applyGeneralPatches(container);
+            // Do not mark a container current until every required patch has been applied.
+            if (!applyGeneralPatches(container)) return false;
             container.putExtra("appVersion", appVersion);
             container.putExtra("rfsVersion", rfsVersion);
             containerDataChanged = true;
@@ -495,6 +518,90 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         if (containerDataChanged) container.saveData();
+        return ensureFileManagerInstalled();
+    }
+
+    /**
+     * The active rootfs path /home/xuser is a symlink to the selected container.
+     * Extracting rootfs_patches directly into the rootfs is rejected by the
+     * extractor's symlink-parent protection. Stage the trusted archive in cache,
+     * then overlay its system and per-container Wine files into real directories.
+     */
+    private boolean applyRootfsPatchArchive(Container targetContainer, boolean includeSystemFiles) {
+        if (targetContainer == null) return false;
+        File containerRoot = targetContainer.getRootDir();
+        if (containerRoot == null || !containerRoot.isDirectory() || FileUtils.isSymlink(containerRoot)) {
+            android.util.Log.e("WinMali-FileManager", "Container root directory is unavailable or unsafe");
+            return false;
+        }
+
+        File stagingDir = new File(getCacheDir(),
+            "rootfs-patches-"+targetContainer.id+"-"+System.nanoTime());
+        try {
+            if (!TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD,
+                this, "rootfs_patches.tzst", stagingDir)) {
+                android.util.Log.e("WinMali-FileManager", "Unable to stage rootfs_patches.tzst");
+                return false;
+            }
+
+            if (includeSystemFiles) {
+                File stagedOpt = new File(stagingDir, "opt");
+                File stagedUsr = new File(stagingDir, "usr");
+                File targetOpt = new File(rootFS.getRootDir(), "opt");
+                File targetUsr = new File(rootFS.getRootDir(), "usr");
+                if (!copyPatchDirectory(stagedOpt, targetOpt) ||
+                    !copyPatchDirectory(stagedUsr, targetUsr)) {
+                    android.util.Log.e("WinMali-FileManager", "Unable to apply rootfs system patches");
+                    return false;
+                }
+            }
+
+            File stagedWine = new File(stagingDir, "home/"+RootFS.USER+"/.wine");
+            File targetWine = new File(containerRoot, ".wine");
+            if (!copyPatchDirectory(stagedWine, targetWine)) {
+                android.util.Log.e("WinMali-FileManager", "Unable to apply per-container Wine patches");
+                return false;
+            }
+
+            File windowsDir = new File(targetWine, "drive_c/windows");
+            if (!isNonEmptyFile(new File(windowsDir, "wfm.exe")) ||
+                !isNonEmptyFile(new File(windowsDir, "winhandler.exe"))) {
+                android.util.Log.e("WinMali-FileManager", "Required file-manager binaries are missing after patch application");
+                return false;
+            }
+            return true;
+        }
+        catch (RuntimeException error) {
+            android.util.Log.e("WinMali-FileManager", "Unable to apply rootfs patch archive", error);
+            return false;
+        }
+        finally {
+            if (stagingDir.exists()) FileUtils.delete(stagingDir);
+        }
+    }
+
+    private static boolean copyPatchDirectory(File source, File destination) {
+        if (source == null || destination == null || !source.isDirectory() ||
+            FileUtils.isSymlink(source) || FileUtils.isSymlink(destination)) return false;
+        return FileUtils.copy(source, destination,
+            file -> FileUtils.chmod(file, 0771));
+    }
+
+    /** Restore missing WFM files directly into this container's actual Wine prefix. */
+    private boolean ensureFileManagerInstalled() {
+        File containerRoot = container != null ? container.getRootDir() : null;
+        if (containerRoot == null || !containerRoot.isDirectory() || FileUtils.isSymlink(containerRoot)) return false;
+        File windowsDir = new File(containerRoot, ".wine/drive_c/windows");
+        if (isNonEmptyFile(new File(windowsDir, "wfm.exe")) &&
+            isNonEmptyFile(new File(windowsDir, "winhandler.exe"))) return true;
+
+        android.util.Log.w("WinMali-FileManager",
+            "Container file manager files are missing; restoring per-container Wine patches");
+        return applyRootfsPatchArchive(container, false);
+    }
+
+    private static boolean isNonEmptyFile(File file) {
+        return file.isFile() && file.length() > 0;
     }
 
     private void setupXEnvironment() {
@@ -561,7 +668,14 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         guestProgramLauncherComponent.setEnvVars(envVars);
-        guestProgramLauncherComponent.setTerminationCallback((status) -> exit());
+        guestProgramLauncherComponent.setTerminationCallback((status) -> {
+            android.util.Log.e("WinMali-Launch", "Wine/Box64 session exited with status "+status);
+            runOnUiThread(() -> {
+                if (!isFinishing() && !isDestroyed()) exit();
+            });
+        });
+        guestProgramLauncherComponent.setOutputCallback((line) ->
+            android.util.Log.i("WinMali-Guest", line));
         environment.addComponent(guestProgramLauncherComponent);
 
         if (isGenerateWineprefix()) {
@@ -572,9 +686,18 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             envVars.putAll(overrideEnvVars);
             overrideEnvVars = null;
         }
-        environment.startEnvironmentComponents();
+        // Bind the guest-control socket before Wine starts so the initial
+        // one-byte INIT handshake cannot be lost during asynchronous startup.
+        if (!winHandler.start()) {
+            android.util.Log.e("WinMali-Launch", "Unable to bind WinHandler UDP port 7947");
+            runOnUiThread(() -> {
+                AppUtils.showToast(this, R.string.winhandler_start_failed);
+                finish();
+            });
+            return;
+        }
 
-        winHandler.start();
+        environment.startEnvironmentComponents();
         envVars.clear();
         graphicsDriver = null;
         dxwrapperConfig = null;
@@ -1085,15 +1208,22 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
     }
 
-    private void applyGeneralPatches(Container container) {
+    private boolean applyGeneralPatches(Container container) {
         File rootDir = rootFS.getRootDir();
-        FileUtils.delete(new File(rootDir, "/opt/apps"));
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "rootfs_patches.tzst", rootDir);
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "pulseaudio.tzst", new File(getFilesDir(), "pulseaudio"));
+        FileUtils.delete(new File(rootDir, "opt/apps"));
+        if (!applyRootfsPatchArchive(container, true)) return false;
+
+        // PulseAudio extraction remains a non-fatal fallback, as before.
+        if (!TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
+            "pulseaudio.tzst", new File(getFilesDir(), "pulseaudio"))) {
+            android.util.Log.w("WinMali-FileManager", "Unable to refresh PulseAudio files");
+        }
+
         WineUtils.applySystemTweaks(this, wineInfo);
         container.putExtra("dxwrapper", null);
         container.putExtra("desktopTheme", null);
         SettingsFragment.resetPreferenceVersions(this);
+        return true;
     }
 
     public void changeFrameRatingVisibility(Window window, boolean visible) {
