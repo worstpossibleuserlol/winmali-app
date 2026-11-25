@@ -52,6 +52,214 @@ jobs:
           nuget restore "directx-sdk-samples/C++/Direct3D/EmptyProject/EmptyProject_2022.sln" -PackagesDirectory "directx-sdk-samples/C++/packages"
           if ($LASTEXITCODE -ne 0) { throw "NuGet restore failed" }
 
+      - name: Patch Direct3D 9 smoke test for Wine compatibility and diagnostics
+        shell: pwsh
+        run: |
+          $sourcePath = "directx-sdk-samples/C++/Direct3D/EmptyProject/EmptyProject.cpp"
+          if (-not (Test-Path $sourcePath)) { throw "Pinned upstream EmptyProject.cpp is missing" }
+
+          $source = @'
+          //--------------------------------------------------------------------------------------
+          // WinMali Direct3D 9 smoke test, based on Microsoft's DirectX SDK EmptyProject.
+          // Upstream source: https://github.com/microsoft/DirectX-SDK-Samples
+          //--------------------------------------------------------------------------------------
+          #include "DXUT.h"
+          #include "resource.h"
+
+          struct D3D9TestVertex
+          {
+              float x;
+              float y;
+              float z;
+              float rhw;
+              D3DCOLOR color;
+          };
+
+          static void LogD3D9Failure(const char* operation, HRESULT result)
+          {
+              char message[160];
+              wsprintfA(message, "WinMali Test Direct3D: %s failed (HRESULT=0x%08lX)\n",
+                  operation, (unsigned long)result);
+              OutputDebugStringA(message);
+          }
+
+          // Do not require unrelated texture/post-pixel-shader blending features.
+          // The smoke test only needs a D3D9 device and fixed-function triangle rendering.
+          bool CALLBACK IsD3D9DeviceAcceptable(D3DCAPS9*, D3DFORMAT, D3DFORMAT,
+                                               bool, void*)
+          {
+              return true;
+          }
+
+          bool CALLBACK ModifyDeviceSettings(DXUTDeviceSettings*, void*)
+          {
+              return true;
+          }
+
+          HRESULT CALLBACK OnD3D9CreateDevice(IDirect3DDevice9*,
+              const D3DSURFACE_DESC*, void*)
+          {
+              return S_OK;
+          }
+
+          HRESULT CALLBACK OnD3D9ResetDevice(IDirect3DDevice9*,
+              const D3DSURFACE_DESC*, void*)
+          {
+              return S_OK;
+          }
+
+          void CALLBACK OnFrameMove(double, float, void*)
+          {
+          }
+
+          void CALLBACK OnD3D9FrameRender(IDirect3DDevice9* device,
+              double, float, void*)
+          {
+              if (device == NULL)
+              {
+                  OutputDebugStringA("WinMali Test Direct3D: D3D9 device is null\n");
+                  return;
+              }
+
+              HRESULT hr = device->Clear(0, NULL, D3DCLEAR_TARGET,
+                  D3DCOLOR_XRGB(24, 32, 64), 1.0f, 0);
+              if (FAILED(hr))
+              {
+                  LogD3D9Failure("Clear", hr);
+                  return;
+              }
+
+              hr = device->BeginScene();
+              if (FAILED(hr))
+              {
+                  LogD3D9Failure("BeginScene", hr);
+                  return;
+              }
+
+              D3DVIEWPORT9 viewport = {};
+              hr = device->GetViewport(&viewport);
+              if (SUCCEEDED(hr) && viewport.Width > 0 && viewport.Height > 0)
+              {
+                  const float left = (float)viewport.X;
+                  const float top = (float)viewport.Y;
+                  const float width = (float)viewport.Width;
+                  const float height = (float)viewport.Height;
+
+                  D3D9TestVertex vertices[3] =
+                  {
+                      { left + width * 0.50f, top + height * 0.16f, 0.5f, 1.0f,
+                          D3DCOLOR_ARGB(255, 255, 80, 80) },
+                      { left + width * 0.20f, top + height * 0.82f, 0.5f, 1.0f,
+                          D3DCOLOR_ARGB(255, 80, 255, 120) },
+                      { left + width * 0.80f, top + height * 0.82f, 0.5f, 1.0f,
+                          D3DCOLOR_ARGB(255, 80, 160, 255) }
+                  };
+
+                  hr = device->SetVertexShader(NULL);
+                  if (SUCCEEDED(hr)) hr = device->SetPixelShader(NULL);
+                  if (SUCCEEDED(hr)) hr = device->SetTexture(0, NULL);
+                  if (SUCCEEDED(hr)) hr = device->SetRenderState(D3DRS_ZENABLE, FALSE);
+                  if (SUCCEEDED(hr)) hr = device->SetRenderState(D3DRS_LIGHTING, FALSE);
+                  if (SUCCEEDED(hr)) hr = device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+                  if (SUCCEEDED(hr)) hr = device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+                  if (SUCCEEDED(hr)) hr = device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+                  if (SUCCEEDED(hr))
+                  {
+                      hr = device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1,
+                          vertices, sizeof(D3D9TestVertex));
+                  }
+              }
+              else if (FAILED(hr))
+              {
+                  LogD3D9Failure("GetViewport", hr);
+              }
+
+              if (FAILED(hr)) LogD3D9Failure("Fixed-function triangle", hr);
+
+              hr = device->EndScene();
+              if (FAILED(hr)) LogD3D9Failure("EndScene", hr);
+          }
+
+          LRESULT CALLBACK MsgProc(HWND, UINT, WPARAM, LPARAM,
+              bool*, void*)
+          {
+              return 0;
+          }
+
+          void CALLBACK OnD3D9LostDevice(void*)
+          {
+          }
+
+          void CALLBACK OnD3D9DestroyDevice(void*)
+          {
+          }
+
+          INT WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
+          {
+              DXUTSetCallbackD3D9DeviceAcceptable(IsD3D9DeviceAcceptable);
+              DXUTSetCallbackD3D9DeviceCreated(OnD3D9CreateDevice);
+              DXUTSetCallbackD3D9DeviceReset(OnD3D9ResetDevice);
+              DXUTSetCallbackD3D9FrameRender(OnD3D9FrameRender);
+              DXUTSetCallbackD3D9DeviceLost(OnD3D9LostDevice);
+              DXUTSetCallbackD3D9DeviceDestroyed(OnD3D9DestroyDevice);
+              DXUTSetCallbackDeviceChanging(ModifyDeviceSettings);
+              DXUTSetCallbackMsgProc(MsgProc);
+              DXUTSetCallbackFrameMove(OnFrameMove);
+
+              HRESULT hr = DXUTInit(true, false);
+              if (FAILED(hr))
+              {
+                  LogD3D9Failure("DXUTInit", hr);
+                  return (INT)hr;
+              }
+
+              // This executable intentionally tests Direct3D 9, not DXUT's D3D10 path.
+              DXUTSetD3DVersionSupport(true, false);
+              DXUTSetHotkeyHandling(true, true, true);
+              DXUTSetCursorSettings(true, true);
+
+              hr = DXUTCreateWindow(L"WinMali Test Direct3D - Direct3D 9");
+              if (FAILED(hr))
+              {
+                  LogD3D9Failure("DXUTCreateWindow", hr);
+                  DXUTShutdown((INT)hr);
+                  return (INT)hr;
+              }
+
+              hr = DXUTCreateDevice(true, 640, 480);
+              if (FAILED(hr))
+              {
+                  LogD3D9Failure("DXUTCreateDevice", hr);
+                  DXUTShutdown((INT)hr);
+                  return (INT)hr;
+              }
+
+              hr = DXUTMainLoop();
+              if (FAILED(hr)) LogD3D9Failure("DXUTMainLoop", hr);
+
+              const INT exitCode = DXUTGetExitCode();
+              DXUTShutdown(exitCode);
+              return exitCode;
+          }
+          '@
+
+          [System.IO.File]::WriteAllText($sourcePath, $source, [System.Text.UTF8Encoding]::new($false))
+          $written = [System.IO.File]::ReadAllText($sourcePath)
+          $required = @(
+            "DXUTSetD3DVersionSupport(true, false)",
+            "D3DCOLOR_XRGB(24, 32, 64)",
+            "DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1",
+            "LogD3D9Failure",
+            "DXUTCreateDevice(true, 640, 480)"
+          )
+          foreach ($marker in $required) {
+            if (-not $written.Contains($marker)) { throw "Direct3D smoke-test patch is incomplete: $marker" }
+          }
+          if ($written.Contains("D3DCOLOR_ARGB(0, 45, 50, 170)")) {
+            throw "The transparent alpha-zero clear colour is still present"
+          }
+          Write-Host "Patched D3D9 test: compatibility-first device selection, opaque clear, visible triangle and failure diagnostics"
+
       - name: Configure static C runtime for the upstream sample
         shell: pwsh
         run: |
@@ -132,7 +340,7 @@ jobs:
           - API: Direct3D 9
           - Architecture: x86-64
 
-          The sample creates a Direct3D 9 device, clears the render target to a blue colour, and presents frames.
+          The sample creates a Direct3D 9 device, clears the backbuffer to an opaque blue, renders a coloured fixed-function triangle, and logs HRESULT failures to the guest debug output. WinMali applies a small documented compatibility patch to Microsoft's sample before building.
           Its original icon is compiled from Microsoft's C++/DXUT/Optional/directx.ico through EmptyProject.rc.
           The source repository is distributed under the MIT License; see LICENSE.
           "@
