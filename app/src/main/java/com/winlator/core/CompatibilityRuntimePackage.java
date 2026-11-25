@@ -76,7 +76,7 @@ public final class CompatibilityRuntimePackage {
             !name.equals(".") && !name.equals("..");
     }
 
-    public static boolean isAarch64Elf(File file) {
+    private static boolean isElf64LittleEndian(File file, int machine) {
         if (file == null || !file.isFile() || file.length() < 20) return false;
         byte[] header = new byte[20];
         try (FileInputStream input = new FileInputStream(file)) {
@@ -90,10 +90,21 @@ public final class CompatibilityRuntimePackage {
                 header[1] == 'E' && header[2] == 'L' && header[3] == 'F' &&
                 (header[4] & 0xff) == 2 && // ELF64
                 (header[5] & 0xff) == 1 && // little-endian
-                (header[18] & 0xff) == 183 && (header[19] & 0xff) == 0; // EM_AARCH64
+                (header[18] & 0xff) == (machine & 0xff) &&
+                (header[19] & 0xff) == ((machine >> 8) & 0xff);
         }
         catch (IOException error) {
             return false;
         }
+    }
+
+    /** Box64 runs natively on AArch64 Android devices. */
+    public static boolean isAarch64Elf(File file) {
+        return isElf64LittleEndian(file, 183); // EM_AARCH64
+    }
+
+    /** Wine and its Windows loader binaries are x86-64 and run through Box64. */
+    public static boolean isX86_64Elf(File file) {
+        return isElf64LittleEndian(file, 62); // EM_X86_64
     }
 }
