@@ -72,6 +72,20 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
                 }
                 Process.killProcess(rootPid);
             }
+            else {
+                // The Box64 parent can exit before this component is stopped.
+                // Wine children may then be re-parented to the Android process,
+                // so they are no longer discoverable from the original root PID.
+                List<ProcessHelper.PStat> remaining = ProcessHelper.getChildProcesses();
+                for (int i = remaining.size() - 1; i >= 0; i--) {
+                    ProcessHelper.PStat child = remaining.get(i);
+                    if (child.guestProcess &&
+                        child.state != ProcessHelper.PState.ZOMBIE &&
+                        child.state != ProcessHelper.PState.DEAD) {
+                        ProcessHelper.killProcess(child.pid);
+                    }
+                }
+            }
         }
     }
 
