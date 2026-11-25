@@ -62,9 +62,15 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
     public void stop() {
         synchronized (lock) {
             processGeneration++;
-            if (pid > 0) {
-                Process.killProcess(pid);
-                pid = -1;
+            int rootPid = pid;
+            pid = -1;
+            if (rootPid > 0) {
+                // Kill the full Wine/Box64 tree before the container prefix is removed.
+                // Descendants must be signalled before their parent is reaped.
+                for (ProcessHelper.PStat child : ProcessHelper.getDescendantProcesses(rootPid)) {
+                    ProcessHelper.killProcess(child.pid);
+                }
+                Process.killProcess(rootPid);
             }
         }
     }
