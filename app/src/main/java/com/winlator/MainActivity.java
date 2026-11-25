@@ -82,13 +82,23 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             // RootFS lives in the app's private files directory and does not depend on
             // legacy shared-storage permissions. Start installation on every first run.
             requestAppPermissions();
-            RootFSInstaller.installIfNeeded(this);
+            startRootFSInstallerSafely();
 
             int containerId = intent.getIntExtra("container_id", 0);
             String startPath = intent.getStringExtra("start_path");
             if (containerId > 0 && startPath != null) {
                 showFragment(new ContainerFileManagerFragment(containerId, startPath));
             }
+        }
+    }
+
+    private void startRootFSInstallerSafely() {
+        try {
+            RootFSInstaller.installIfNeeded(this);
+        }
+        catch (RuntimeException error) {
+            // Keep the launcher usable even if the existing system-files tree is damaged.
+            android.util.Log.e("WinMali-RootFS", "Startup RootFS check failed; the main screen will remain available", error);
         }
     }
 
@@ -109,7 +119,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
                 }
             }
 
-            if (allGranted) RootFSInstaller.installIfNeeded(this);
+            if (allGranted) startRootFSInstallerSafely();
             else AppUtils.showToast(this, R.string.storage_permission_denied_limited);
         }
     }
