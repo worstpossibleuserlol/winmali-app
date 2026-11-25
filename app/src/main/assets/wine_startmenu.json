@@ -39,7 +39,8 @@
             },
             {
                 "name" : "Test Direct3D",
-                "path" : "Z:/opt/apps/TestD3D.exe"
+                "path" : "Z:/opt/apps/TestD3D.exe",
+                "iconLocation" : "Z:/opt/apps/TestD3D.exe"
             },
             {
                 "name" : "Computer",
