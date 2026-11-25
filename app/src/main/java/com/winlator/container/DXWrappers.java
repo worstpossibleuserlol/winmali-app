@@ -9,6 +9,45 @@ public abstract class DXWrappers {
     public static final String CNC_DDRAW = "cnc-ddraw";
     public static final String D7VK = "d7vk";
 
+    private static final String INSTALL_CACHE_SCHEMA = "direct3d-v2";
+
+    /** Resolve missing or blank saved component versions to the packaged default. */
+    public static String resolveVersion(String configuredVersion, String defaultVersion) {
+        if (configuredVersion == null || configuredVersion.trim().isEmpty()) {
+            return defaultVersion != null ? defaultVersion.trim() : "";
+        }
+        return configuredVersion.trim();
+    }
+
+    /** Build a versioned cache key so older, unchecked installs are retried once. */
+    public static String createInstallCacheId(String wrapper, String wrapperVersion,
+            String vkd3dVersion, String ddrawWrapper) {
+        return INSTALL_CACHE_SCHEMA + "|" + cachePart(wrapper) + "|" +
+            cachePart(wrapperVersion) + "|" + cachePart(vkd3dVersion) + "|" +
+            cachePart(ddrawWrapper);
+    }
+
+    private static String cachePart(String value) {
+        return value != null ? value.trim() : "";
+    }
+
+    /** All required layers must install before their cache key may be persisted. */
+    public static boolean isInstallComplete(boolean wrapperInstalled,
+            boolean vkd3dInstalled, boolean ddrawInstalled) {
+        return wrapperInstalled && vkd3dInstalled && ddrawInstalled;
+    }
+
+    /** Parse the optional DXVK PCI device override without trusting saved data. */
+    public static String[] parseCustomDevice(String customDevice) {
+        if (customDevice == null || customDevice.isEmpty()) return null;
+        String[] parts = customDevice.split(":", 3);
+        if (parts.length != 3 || !parts[0].matches("(?i)[0-9a-f]{1,4}") ||
+                !parts[1].matches("(?i)[0-9a-f]{1,4}") || parts[2].trim().isEmpty() ||
+                parts[2].indexOf('"') >= 0 || parts[2].contains("\n") ||
+                parts[2].contains("\r")) return null;
+        return new String[]{parts[0], parts[1], parts[2].trim()};
+    }
+
     public static String getName(String identifier) {
         if (identifier == null) return "None";
         switch (identifier) {

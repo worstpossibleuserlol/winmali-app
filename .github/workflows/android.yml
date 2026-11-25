@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+      - beta
+      - development
+      - runtime-compatibility
+      - gpu-compatibility
+      - hotfix-system-files-extraction
     paths:
       - "**.gradle"
       - "**.java"
@@ -18,6 +23,7 @@ on:
   pull_request:
     branches:
       - main
+      - beta
   workflow_dispatch:
 
 concurrency:
@@ -90,6 +96,39 @@ jobs:
           ROOTFS_MAGIC="$(od -An -tx1 -N4 "$RUNNER_TEMP/rootfs.tzst" | tr -d ' \\n')"
           test "$ROOTFS_MAGIC" = "28b52ffd"
 
+          # Validate the complete compressed TAR stream on Linux. The Android
+          # unit-test JVM cannot load the APK's Android-only zstd native library.
+          sudo apt-get update
+          sudo apt-get install -y zstd
+          zstd -q -t "$RUNNER_TEMP/rootfs.tzst"
+          zstd -q -d -c "$RUNNER_TEMP/rootfs.tzst" | tar -tf - > "$RUNNER_TEMP/rootfs.list"
+          test -s "$RUNNER_TEMP/rootfs.list"
+          grep -Eq '(^|/)opt/wine/bin/wine(64)?' "$RUNNER_TEMP/rootfs.list"
+          grep -Eq '(^|/)opt/wine/lib/wine/x86_64-windows/' "$RUNNER_TEMP/rootfs.list"
+          grep -Eq '(^|/)opt/wine/lib/wine/i386-windows/' "$RUNNER_TEMP/rootfs.list"
+
+          # The bundled Wine is x86-64 and is launched through the bundled
+          # AArch64 Box64 runtime. Verify both ELF architectures explicitly.
+          sudo apt-get install -y binutils
+          zstd -q -d -c "$RUNNER_TEMP/rootfs.tzst" | tar -xOf - ./opt/wine/bin/wine > "$RUNNER_TEMP/wine"
+          test -s "$RUNNER_TEMP/wine"
+          readelf -h "$RUNNER_TEMP/wine" | grep -q 'Machine:.*X86-64'
+
+          unzip -p "$APK" assets/box64/box64-0.4.4.tzst > "$RUNNER_TEMP/box64.tzst"
+          test -s "$RUNNER_TEMP/box64.tzst"
+          zstd -q -t "$RUNNER_TEMP/box64.tzst"
+          zstd -q -d -c "$RUNNER_TEMP/box64.tzst" | tar -xOf - ./usr/local/bin/box64 > "$RUNNER_TEMP/box64"
+          test -s "$RUNNER_TEMP/box64"
+          readelf -h "$RUNNER_TEMP/box64" | grep -q 'Machine:.*AArch64'
+
+          # The built-in Windows file manager and its process wrapper must be
+          # present in every APK so existing containers can repair their prefix.
+          unzip -p "$APK" assets/rootfs_patches.tzst > "$RUNNER_TEMP/rootfs_patches.tzst"
+          test -s "$RUNNER_TEMP/rootfs_patches.tzst"
+          zstd -q -t "$RUNNER_TEMP/rootfs_patches.tzst"
+          zstd -q -d -c "$RUNNER_TEMP/rootfs_patches.tzst" | tar -tf - > "$RUNNER_TEMP/rootfs_patches.list"
+          grep -Fq "home/xuser/.wine/drive_c/windows/wfm.exe" "$RUNNER_TEMP/rootfs_patches.list"
+          grep -Fq "home/xuser/.wine/drive_c/windows/winhandler.exe" "$RUNNER_TEMP/rootfs_patches.list"
           unzip -p "$APK" assets/container_pattern.tzst > "$RUNNER_TEMP/container_pattern.tzst"
           test -s "$RUNNER_TEMP/container_pattern.tzst"
           PATTERN_MAGIC="$(od -An -tx1 -N4 "$RUNNER_TEMP/container_pattern.tzst" | tr -d ' \\n')"

@@ -49,6 +49,8 @@ import com.winlator.core.DefaultVersion;
 import com.winlator.core.EnvVars;
 import com.winlator.core.FileUtils;
 import com.winlator.core.GeneralComponents;
+import com.winlator.core.GPUHelper;
+import com.winlator.core.GpuCompatibilityProfile;
 import com.winlator.core.KeyValueSet;
 import com.winlator.core.LocaleHelper;
 import com.winlator.core.PreloaderDialog;
@@ -137,6 +139,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     public int frameRatingWindowId = -1;
     private Win32AppWorkarounds win32AppWorkarounds;
     private String screenEffectProfile;
+    private final java.util.concurrent.atomic.AtomicBoolean exitRequested = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -272,12 +275,26 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         setupUI();
 
         Executors.newSingleThreadExecutor().execute(() -> {
+            boolean systemFilesReady = true;
             if (!isGenerateWineprefix()) {
-                setupWineSystemFiles();
-                extractGraphicsDriverFiles();
-                changeWineAudioDriver();
+                applyAutomaticGpuCompatibilityFallback();
+                systemFilesReady = setupWineSystemFiles();
+                if (systemFilesReady) {
+                    extractGraphicsDriverFiles();
+                    changeWineAudioDriver();
+                }
             }
-            setupXEnvironment();
+
+            if (systemFilesReady) {
+                setupXEnvironment();
+            }
+            else {
+                runOnUiThread(() -> {
+                    preloaderDialog.closeOnUiThread();
+                    AppUtils.showToast(this, R.string.unable_to_install_system_files);
+                    finish();
+                });
+            }
         });
     }
 
@@ -433,6 +450,12 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     }
 
     private void exit() {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            runOnUiThread(this::exit);
+            return;
+        }
+        if (!exitRequested.compareAndSet(false, true)) return;
+
         winHandler.stop();
         if (environment != null) environment.stopEnvironmentComponents();
 
@@ -447,14 +470,62 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         ForegroundService.stopSession(this);
     }
 
-    private void setupWineSystemFiles() {
+    /**
+     * Re-check automatic Mali settings at launch so containers created by an
+     * older WinMali build do not keep an unsafe automatic DXVK/Turnip selection.
+     * Explicitly manual container settings are left untouched.
+     */
+    private void applyAutomaticGpuCompatibilityFallback() {
+        if (container == null) return;
+
+        String savedAutoSetting = container.getExtra("autoGpuSettings");
+        boolean automaticSettings = "t".equals(savedAutoSetting) ||
+            (savedAutoSetting.isEmpty() && preferences.getBoolean("auto_gpu_settings", true));
+        if (!automaticSettings) return;
+
+        String renderer = "";
+        String vendorName = "";
+        try {
+            renderer = GPUHelper.glGetRenderer(this);
+            vendorName = GPUHelper.glGetVendor(this);
+        }
+        catch (LinkageError | RuntimeException error) {
+            android.util.Log.w("WinMali-GPU", "Unable to identify the GPU for launch compatibility", error);
+        }
+
+        GpuCompatibilityProfile.Vendor vendor =
+            GpuCompatibilityProfile.resolve(renderer, vendorName, 0, null).vendor;
+        if (vendor != GpuCompatibilityProfile.Vendor.MALI) return;
+
+        String safeDXWrapper = GpuCompatibilityProfile.resolveDXWrapperForLaunch(
+            dxwrapper, vendor, true);
+        if (!safeDXWrapper.equals(dxwrapper)) {
+            android.util.Log.w("WinMali-GPU",
+                "Mali GPU detected; replacing automatic DXVK with WineD3D for this session");
+            dxwrapper = safeDXWrapper;
+            dxwrapperConfig = new KeyValueSet[]{new KeyValueSet(), new KeyValueSet()};
+        }
+
+        String safeVulkanDriver = GpuCompatibilityProfile.resolveVulkanDriverForLaunch(
+            graphicsDriver[0], vendor, true);
+        if (!safeVulkanDriver.equals(graphicsDriver[0])) {
+            android.util.Log.w("WinMali-GPU",
+                "Mali GPU detected; replacing automatic Turnip with Vortek for this session");
+            graphicsDriver[0] = safeVulkanDriver;
+            graphicsDriverConfig[0] = new KeyValueSet();
+        }
+    }
+
+    private boolean setupWineSystemFiles() {
         String appVersion = String.valueOf(AppUtils.getVersionCode(this));
         String rfsVersion = String.valueOf(rootFS.getVersion());
         boolean containerDataChanged = false;
 
         boolean wineprefixWasUpdated = WineUtils.isWineprefixWasUpdated(container);
         if (!container.getExtra("appVersion").equals(appVersion) || !container.getExtra("rfsVersion").equals(rfsVersion) || wineprefixWasUpdated) {
-            applyGeneralPatches(container);
+            // Apply patches before updating the marker. If copying fails, the next
+            // launch must retry instead of treating a partially patched prefix as current.
+            if (!applyGeneralPatches(container)) return false;
             container.putExtra("appVersion", appVersion);
             container.putExtra("rfsVersion", rfsVersion);
             containerDataChanged = true;
@@ -495,6 +566,95 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         if (containerDataChanged) container.saveData();
+        return ensureFileManagerInstalled();
+    }
+
+    /**
+     * The active rootfs path /home/xuser is a symlink to the selected container.
+     * Extracting rootfs_patches directly into the rootfs is therefore rejected by
+     * the archive extractor's symlink-parent protection. Stage the trusted archive
+     * in cache, then overlay its system files into rootfs and its Wine files into
+     * the real per-container directory.
+     */
+    private boolean applyRootfsPatchArchive(Container targetContainer, boolean includeSystemFiles) {
+        if (targetContainer == null) return false;
+        File containerRoot = targetContainer.getRootDir();
+        if (containerRoot == null || !containerRoot.isDirectory() || FileUtils.isSymlink(containerRoot)) {
+            android.util.Log.e("WinMali-FileManager", "Container root directory is unavailable or unsafe");
+            return false;
+        }
+
+        File stagingDir = new File(getCacheDir(),
+            "rootfs-patches-"+targetContainer.id+"-"+System.nanoTime());
+        try {
+            if (!TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD,
+                this, "rootfs_patches.tzst", stagingDir)) {
+                android.util.Log.e("WinMali-FileManager", "Unable to stage rootfs_patches.tzst");
+                return false;
+            }
+
+            if (includeSystemFiles) {
+                File stagedOpt = new File(stagingDir, "opt");
+                File stagedUsr = new File(stagingDir, "usr");
+                File targetOpt = new File(rootFS.getRootDir(), "opt");
+                File targetUsr = new File(rootFS.getRootDir(), "usr");
+                if (!copyPatchDirectory(stagedOpt, targetOpt) ||
+                    !copyPatchDirectory(stagedUsr, targetUsr)) {
+                    android.util.Log.e("WinMali-FileManager", "Unable to apply rootfs system patches");
+                    return false;
+                }
+            }
+
+            File stagedWine = new File(stagingDir, "home/"+RootFS.USER+"/.wine");
+            File targetWine = new File(containerRoot, ".wine");
+            if (!copyPatchDirectory(stagedWine, targetWine)) {
+                android.util.Log.e("WinMali-FileManager", "Unable to apply per-container Wine patches");
+                return false;
+            }
+
+            File windowsDir = new File(targetWine, "drive_c/windows");
+            if (!isNonEmptyFile(new File(windowsDir, "wfm.exe")) ||
+                !isNonEmptyFile(new File(windowsDir, "winhandler.exe"))) {
+                android.util.Log.e("WinMali-FileManager", "Required file-manager binaries are missing after patch application");
+                return false;
+            }
+            return true;
+        }
+        catch (RuntimeException error) {
+            android.util.Log.e("WinMali-FileManager", "Unable to apply rootfs patch archive", error);
+            return false;
+        }
+        finally {
+            if (stagingDir.exists()) FileUtils.delete(stagingDir);
+        }
+    }
+
+    private static boolean copyPatchDirectory(File source, File destination) {
+        if (source == null || destination == null || !source.isDirectory() ||
+            FileUtils.isSymlink(source) || FileUtils.isSymlink(destination)) return false;
+        return FileUtils.copy(source, destination,
+            file -> FileUtils.chmod(file, 0771));
+    }
+
+    /**
+     * Existing containers may already carry the current app-version marker but
+     * still lack WFM because an earlier patch extraction stopped at the active
+     * container symlink. Repair the Wine tree in the selected container itself.
+     */
+    private boolean ensureFileManagerInstalled() {
+        File containerRoot = container != null ? container.getRootDir() : null;
+        if (containerRoot == null || !containerRoot.isDirectory() || FileUtils.isSymlink(containerRoot)) return false;
+        File windowsDir = new File(containerRoot, ".wine/drive_c/windows");
+        if (isNonEmptyFile(new File(windowsDir, "wfm.exe")) &&
+            isNonEmptyFile(new File(windowsDir, "winhandler.exe"))) return true;
+
+        android.util.Log.w("WinMali-FileManager",
+            "Container file manager files are missing; restoring per-container Wine patches");
+        return applyRootfsPatchArchive(container, false);
+    }
+
+    private static boolean isNonEmptyFile(File file) {
+        return file.isFile() && file.length() > 0;
     }
 
     private void setupXEnvironment() {
@@ -561,7 +721,14 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         guestProgramLauncherComponent.setEnvVars(envVars);
-        guestProgramLauncherComponent.setTerminationCallback((status) -> exit());
+        guestProgramLauncherComponent.setTerminationCallback((status) -> {
+            android.util.Log.e("WinMali-Launch", "Wine/Box64 session exited with status "+status);
+            runOnUiThread(() -> {
+                if (!isFinishing() && !isDestroyed()) exit();
+            });
+        });
+        guestProgramLauncherComponent.setOutputCallback((line) ->
+            android.util.Log.i("WinMali-Guest", line));
         environment.addComponent(guestProgramLauncherComponent);
 
         if (isGenerateWineprefix()) {
@@ -572,9 +739,20 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             envVars.putAll(overrideEnvVars);
             overrideEnvVars = null;
         }
-        environment.startEnvironmentComponents();
 
-        winHandler.start();
+        // winhandler.exe sends its initial UDP handshake immediately. Bind the
+        // Android listener synchronously before starting Box64/Wine or that first
+        // packet can be lost and applications will never appear.
+        if (!winHandler.start()) {
+            android.util.Log.e("WinMali-Launch", "Unable to start WinHandler UDP listener on port 7947");
+            runOnUiThread(() -> {
+                AppUtils.showToast(this, R.string.winhandler_start_failed);
+                finish();
+            });
+            return;
+        }
+
+        environment.startEnvironmentComponents();
         envVars.clear();
         graphicsDriver = null;
         dxwrapperConfig = null;
@@ -811,81 +989,190 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     }
 
     private boolean extractDXWrapperFiles() {
-        String cacheId = "";
+        String defaultWrapperVersion = dxwrapper.equals(DXWrappers.DXVK) ?
+            DefaultVersion.DXVK(graphicsDriver[0]) : DefaultVersion.WINED3D;
+        String wrapperVersion = dxwrapper.equals(DXWrappers.DXVK) ||
+                dxwrapper.equals(DXWrappers.WINED3D) ?
+            DXWrappers.resolveVersion(dxwrapperConfig[0].get("version"), defaultWrapperVersion) : "";
+        String vkd3dVersion = DXWrappers.resolveVersion(
+            dxwrapperConfig[1].get("version"), DefaultVersion.VKD3D);
+        String ddrawWrapper = DXWrappers.resolveVersion(
+            dxwrapperConfig[0].get("ddrawWrapper"), DXWrappers.WINED3D);
+
+        String cacheId = DXWrappers.createInstallCacheId(
+            dxwrapper, wrapperVersion, vkd3dVersion, ddrawWrapper);
+
         if (dxwrapper.equals(DXWrappers.DXVK)) {
             DXVKConfigDialog.setEnvVars(this, dxwrapperConfig[0], envVars);
-            cacheId += dxwrapper+"-"+dxwrapperConfig[0].get("version", DefaultVersion.DXVK(graphicsDriver[0]));
         }
         else if (dxwrapper.equals(DXWrappers.WINED3D)) {
             WineD3DConfigDialog.setEnvVars(dxwrapperConfig[0], envVars);
-            cacheId += dxwrapper+"-"+dxwrapperConfig[0].get("version", DefaultVersion.WINED3D);
         }
 
-        String ddrawWrapper = dxwrapperConfig[0].get("ddrawWrapper", DXWrappers.WINED3D);
-        cacheId += "-"+DXWrappers.VKD3D+"-"+dxwrapperConfig[1].get("version", DefaultVersion.VKD3D)+"-"+ddrawWrapper;
-        boolean changed = !cacheId.equals(container.getExtra("dxwrapper"));
         VKD3DConfigDialog.setEnvVars(dxwrapperConfig[1], envVars);
+        if (ddrawWrapper.equals(DXWrappers.CNC_DDRAW)) {
+            envVars.put("CNC_DDRAW_CONFIG_FILE", "C:\\ProgramData\\cnc-ddraw\\ddraw.ini");
+        }
 
-        if (ddrawWrapper.equals(DXWrappers.CNC_DDRAW)) envVars.put("CNC_DDRAW_CONFIG_FILE", "C:\\ProgramData\\cnc-ddraw\\ddraw.ini");
-
+        // Older builds wrote this marker before checking extraction results. The
+        // schema change invalidates those markers, and missing DLLs trigger repair.
+        boolean changed = !cacheId.equals(container.getExtra("dxwrapper")) ||
+            !areDXWrapperFilesPresent();
         if (!changed) return false;
-        container.putExtra("dxwrapper", cacheId);
 
         File rootDir = rootFS.getRootDir();
         File windowsDir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows");
+        boolean wrapperInstalled = true;
 
         if (dxwrapper.equals(DXWrappers.WINED3D)) {
-            String version = dxwrapperConfig[0].get("version", DefaultVersion.WINED3D);
-            if (version.equals(WineInfo.MAIN_WINE_VERSION)) {
-                final String[] dlls = {"d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll", "d3d10core.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll", "dxgi.dll", "ddraw.dll", "wined3d.dll"};
-                restoreBuiltinDllFiles(dlls);
+            if (wrapperVersion.equals(WineInfo.MAIN_WINE_VERSION)) {
+                final String[] dlls = {
+                    "d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll",
+                    "d3d10core.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll",
+                    "dxgi.dll", "ddraw.dll", "wined3d.dll"
+                };
+                wrapperInstalled = restoreBuiltinDllFilesVerified(dlls);
             }
-            else GeneralComponents.extractFile(GeneralComponents.Type.WINED3D, this, version, DefaultVersion.WINED3D);
+            else {
+                String installedVersion = GeneralComponents.extractFileResolvedVersion(
+                    GeneralComponents.Type.WINED3D, this, wrapperVersion,
+                    DefaultVersion.WINED3D, null);
+                wrapperInstalled = installedVersion != null;
+            }
+            wrapperInstalled = wrapperInstalled && areWindowsDllsPresent(
+                "d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll",
+                "d3d11.dll", "dxgi.dll", "wined3d.dll");
         }
         else if (dxwrapper.equals(DXWrappers.DXVK)) {
             final boolean[] hasD3D8DllFile = {false};
             final boolean[] hasD3D10DllFile = {false};
 
-            GeneralComponents.extractFile(GeneralComponents.Type.DXVK, this, dxwrapperConfig[0].get("version"), DefaultVersion.DXVK(graphicsDriver[0]), (destination, size) -> {
-                String name = destination.getName();
-                if (name.equals("d3d10.dll")) {
-                    hasD3D10DllFile[0] = true;
-                }
-                else if (name.equals("d3d8.dll")) {
-                    hasD3D8DllFile[0] = true;
-                }
-                return destination;
-            });
+            String installedVersion = GeneralComponents.extractFileResolvedVersion(
+                GeneralComponents.Type.DXVK, this, wrapperVersion,
+                DefaultVersion.DXVK(graphicsDriver[0]), (destination, size) -> {
+                    String name = destination.getName();
+                    if (name.equals("d3d10.dll")) hasD3D10DllFile[0] = true;
+                    else if (name.equals("d3d8.dll")) hasD3D8DllFile[0] = true;
+                    return destination;
+                });
+            wrapperInstalled = installedVersion != null;
 
-            if (!hasD3D8DllFile[0]) {
-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "dxwrapper/d8vk-"+DefaultVersion.D8VK+".tzst", windowsDir);
+            if (wrapperInstalled && !hasD3D8DllFile[0]) {
+                wrapperInstalled = TarCompressorUtils.extract(
+                    TarCompressorUtils.Type.ZSTD, this,
+                    "dxwrapper/d8vk-"+DefaultVersion.D8VK+".tzst", windowsDir) &&
+                    areSysWoW64DllsPresent("d3d8.dll");
             }
-            if (!hasD3D10DllFile[0]) restoreBuiltinDllFiles("d3d10.dll", "d3d10_1.dll");
+
+            if (wrapperInstalled && !hasD3D10DllFile[0]) {
+                wrapperInstalled = restoreBuiltinDllFilesVerified(
+                    "d3d10.dll", "d3d10_1.dll");
+            }
+
+            wrapperInstalled = wrapperInstalled && areSysWoW64DllsPresent("d3d8.dll") &&
+                areWindowsDllsPresent(
+                    "d3d9.dll", "d3d10.dll", "d3d10_1.dll", "d3d11.dll", "dxgi.dll");
         }
 
-        GeneralComponents.extractFile(GeneralComponents.Type.VKD3D, this, dxwrapperConfig[1].get("version"), DefaultVersion.VKD3D);
+        String installedVkd3dVersion = GeneralComponents.extractFileResolvedVersion(
+            GeneralComponents.Type.VKD3D, this, vkd3dVersion, DefaultVersion.VKD3D, null);
+        boolean vkd3dInstalled = installedVkd3dVersion != null &&
+            areWindowsDllsPresent("d3d12.dll");
 
-        File containerSysWoW64Dir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows/syswow64");
+        File containerSysWoW64Dir = new File(rootDir,
+            RootFS.WINEPREFIX+"/drive_c/windows/syswow64");
         FileUtils.delete(new File(containerSysWoW64Dir, "ddraw_.dll"));
 
+        boolean ddrawInstalled;
         switch (ddrawWrapper) {
-            case DXWrappers.CNC_DDRAW:
+            case DXWrappers.CNC_DDRAW: {
                 final String assetDir = "dxwrapper/cnc-ddraw-"+DefaultVersion.CNC_DDRAW;
-                File configFile = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/ProgramData/cnc-ddraw/ddraw.ini");
-                if (!configFile.isFile()) FileUtils.copy(this, assetDir+"/ddraw.ini", configFile);
-                File shadersDir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/ProgramData/cnc-ddraw/Shaders");
+                File configFile = new File(rootDir,
+                    RootFS.WINEPREFIX+"/drive_c/ProgramData/cnc-ddraw/ddraw.ini");
+                ddrawInstalled = configFile.isFile() ||
+                    FileUtils.copy(this, assetDir+"/ddraw.ini", configFile);
+
+                File shadersDir = new File(rootDir,
+                    RootFS.WINEPREFIX+"/drive_c/ProgramData/cnc-ddraw/Shaders");
                 FileUtils.delete(shadersDir);
-                FileUtils.copy(this, assetDir+"/Shaders", shadersDir);
-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, assetDir+"/ddraw.tzst", windowsDir);
+                ddrawInstalled = ddrawInstalled &&
+                    FileUtils.copy(this, assetDir+"/Shaders", shadersDir);
+                ddrawInstalled = ddrawInstalled && TarCompressorUtils.extract(
+                    TarCompressorUtils.Type.ZSTD, this, assetDir+"/ddraw.tzst", windowsDir);
+                ddrawInstalled = ddrawInstalled && areWindowsDllsPresent("ddraw.dll");
                 break;
-            case DXWrappers.D7VK:
-                restoreBuiltinDllFiles("ddraw.dll");
-                (new File(containerSysWoW64Dir, "ddraw.dll")).renameTo(new File(containerSysWoW64Dir, "ddraw_.dll"));
-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "dxwrapper/d7vk-"+DefaultVersion.D7VK+".tzst", windowsDir);
+            }
+            case DXWrappers.D7VK: {
+                ddrawInstalled = restoreBuiltinDllFilesVerified("ddraw.dll");
+                File originalDdraw = new File(containerSysWoW64Dir, "ddraw.dll");
+                File renamedDdraw = new File(containerSysWoW64Dir, "ddraw_.dll");
+                if (ddrawInstalled && originalDdraw.isFile()) {
+                    ddrawInstalled = originalDdraw.renameTo(renamedDdraw);
+                }
+                if (ddrawInstalled) {
+                    ddrawInstalled = TarCompressorUtils.extract(
+                        TarCompressorUtils.Type.ZSTD, this,
+                        "dxwrapper/d7vk-"+DefaultVersion.D7VK+".tzst", windowsDir) &&
+                        areWindowsDllsPresent("ddraw.dll");
+                }
                 break;
+            }
             default:
-                restoreBuiltinDllFiles("ddraw.dll");
+                ddrawInstalled = restoreBuiltinDllFilesVerified("ddraw.dll");
                 break;
+        }
+
+        if (!DXWrappers.isInstallComplete(wrapperInstalled, vkd3dInstalled, ddrawInstalled)) {
+            android.util.Log.e("WinMali-Direct3D",
+                "Direct3D component installation incomplete; cache marker was not updated. " +
+                "The installer will retry on the next launch.");
+            return false;
+        }
+
+        // Persist only after every requested layer has been extracted and checked.
+        container.putExtra("dxwrapper", cacheId);
+        android.util.Log.i("WinMali-Direct3D",
+            "Installed "+dxwrapper+" "+wrapperVersion+" and VKD3D "+installedVkd3dVersion);
+        return true;
+    }
+
+    private boolean areDXWrapperFilesPresent() {
+        boolean wrapperPresent = true;
+        if (dxwrapper.equals(DXWrappers.DXVK)) {
+            wrapperPresent = areSysWoW64DllsPresent("d3d8.dll") &&
+                areWindowsDllsPresent(
+                    "d3d9.dll", "d3d10.dll", "d3d10_1.dll", "d3d11.dll", "dxgi.dll");
+        }
+        else if (dxwrapper.equals(DXWrappers.WINED3D)) {
+            wrapperPresent = areWindowsDllsPresent(
+                "d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll",
+                "d3d11.dll", "dxgi.dll", "wined3d.dll");
+        }
+        return wrapperPresent && areWindowsDllsPresent("d3d12.dll", "ddraw.dll");
+    }
+
+    private boolean restoreBuiltinDllFilesVerified(final String... dlls) {
+        restoreBuiltinDllFiles(dlls);
+        return areWindowsDllsPresent(dlls);
+    }
+
+    private boolean areSysWoW64DllsPresent(final String... dlls) {
+        File sysWoW64Dir = new File(rootFS.getRootDir(),
+            RootFS.WINEPREFIX+"/drive_c/windows/syswow64");
+        for (String dll : dlls) {
+            if (!new File(sysWoW64Dir, dll).isFile()) return false;
+        }
+        return true;
+    }
+
+    private boolean areWindowsDllsPresent(final String... dlls) {
+        File windowsDir = new File(rootFS.getRootDir(),
+            RootFS.WINEPREFIX+"/drive_c/windows");
+        File system32Dir = new File(windowsDir, "system32");
+        File sysWoW64Dir = new File(windowsDir, "syswow64");
+        for (String dll : dlls) {
+            if (!new File(system32Dir, dll).isFile() ||
+                    !new File(sysWoW64Dir, dll).isFile()) return false;
         }
         return true;
     }
@@ -1085,15 +1372,23 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
     }
 
-    private void applyGeneralPatches(Container container) {
+    private boolean applyGeneralPatches(Container container) {
         File rootDir = rootFS.getRootDir();
-        FileUtils.delete(new File(rootDir, "/opt/apps"));
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "rootfs_patches.tzst", rootDir);
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "pulseaudio.tzst", new File(getFilesDir(), "pulseaudio"));
+        FileUtils.delete(new File(rootDir, "opt/apps"));
+        if (!applyRootfsPatchArchive(container, true)) return false;
+
+        // Keep the existing separate PulseAudio payload and extraction location.
+        if (!TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,
+            "pulseaudio.tzst", new File(getFilesDir(), "pulseaudio"))) {
+            // Preserve the pre-existing non-fatal PulseAudio fallback behaviour.
+            android.util.Log.w("WinMali-FileManager", "Unable to refresh PulseAudio files");
+        }
+
         WineUtils.applySystemTweaks(this, wineInfo);
         container.putExtra("dxwrapper", null);
         container.putExtra("desktopTheme", null);
         SettingsFragment.resetPreferenceVersions(this);
+        return true;
     }
 
     public void changeFrameRatingVisibility(Window window, boolean visible) {

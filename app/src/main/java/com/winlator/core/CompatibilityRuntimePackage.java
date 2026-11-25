@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
  */
 public final class CompatibilityRuntimePackage {
     private static final Pattern VERSION_PATTERN = Pattern.compile(
-        "[0-9]+(?:\\.[0-9]+){1,3}(?:[-+][A-Za-z0-9][A-Za-z0-9.-]*)?"
+        "[0-9]+(?:\\.[0-9]+){1,3}(?:[A-Za-z][A-Za-z0-9.-]*|[-+][A-Za-z0-9][A-Za-z0-9.-]*)?"
     );
 
     private CompatibilityRuntimePackage() {}
@@ -22,6 +22,48 @@ public final class CompatibilityRuntimePackage {
     public static boolean isValidVersionName(String version) {
         return version != null && VERSION_PATTERN.matcher(version).matches() &&
             !version.contains("..") && !version.endsWith(".");
+    }
+
+    /**
+     * Compares numeric version segments first, then prerelease/build suffixes.
+     * This keeps tags such as "3.0b" in the correct place instead of treating
+     * them as version zero in the component selector.
+     */
+    public static int compareVersionNames(String first, String second) {
+        if (first == second) return 0;
+        if (first == null) return -1;
+        if (second == null) return 1;
+
+        java.util.regex.Matcher firstMatcher =
+            Pattern.compile("^([0-9]+(?:\\.[0-9]+){1,3})(.*)$").matcher(first);
+        java.util.regex.Matcher secondMatcher =
+            Pattern.compile("^([0-9]+(?:\\.[0-9]+){1,3})(.*)$").matcher(second);
+        if (!firstMatcher.matches() || !secondMatcher.matches()) {
+            return first.compareToIgnoreCase(second);
+        }
+
+        String[] firstParts = firstMatcher.group(1).split("\\.");
+        String[] secondParts = secondMatcher.group(1).split("\\.");
+        int count = Math.max(firstParts.length, secondParts.length);
+        for (int i = 0; i < count; i++) {
+            String firstPart = i < firstParts.length ? firstParts[i] : "0";
+            String secondPart = i < secondParts.length ? secondParts[i] : "0";
+            int compared = compareNumericSegments(firstPart, secondPart);
+            if (compared != 0) return compared;
+        }
+
+        String firstSuffix = firstMatcher.group(2);
+        String secondSuffix = secondMatcher.group(2);
+        if (firstSuffix.isEmpty() && !secondSuffix.isEmpty()) return 1;
+        if (!firstSuffix.isEmpty() && secondSuffix.isEmpty()) return -1;
+        return firstSuffix.compareToIgnoreCase(secondSuffix);
+    }
+
+    private static int compareNumericSegments(String first, String second) {
+        String normalizedFirst = first.replaceFirst("^0+(?!$)", "");
+        String normalizedSecond = second.replaceFirst("^0+(?!$)", "");
+        int lengthComparison = Integer.compare(normalizedFirst.length(), normalizedSecond.length());
+        return lengthComparison != 0 ? lengthComparison : normalizedFirst.compareTo(normalizedSecond);
     }
 
     public static String normalizeRelativePath(String path) {
@@ -76,7 +118,7 @@ public final class CompatibilityRuntimePackage {
             !name.equals(".") && !name.equals("..");
     }
 
-    public static boolean isAarch64Elf(File file) {
+    private static boolean isElf64LittleEndian(File file, int machine) {
         if (file == null || !file.isFile() || file.length() < 20) return false;
         byte[] header = new byte[20];
         try (FileInputStream input = new FileInputStream(file)) {
@@ -90,10 +132,29 @@ public final class CompatibilityRuntimePackage {
                 header[1] == 'E' && header[2] == 'L' && header[3] == 'F' &&
                 (header[4] & 0xff) == 2 && // ELF64
                 (header[5] & 0xff) == 1 && // little-endian
-                (header[18] & 0xff) == 183 && (header[19] & 0xff) == 0; // EM_AARCH64
+                (header[18] & 0xff) == (machine & 0xff) &&
+                (header[19] & 0xff) == ((machine >>> 8) & 0xff);
         }
         catch (IOException error) {
             return false;
         }
+    }
+
+    /** Returns true for an AArch64 Linux ELF executable. */
+    public static boolean isAarch64Elf(File file) {
+        return isElf64LittleEndian(file, 183); // EM_AARCH64
+    }
+
+    /** Returns true for an x86-64 Linux ELF executable, normally run through Box64 on Android. */
+    public static boolean isX86_64Elf(File file) {
+        return isElf64LittleEndian(file, 62); // EM_X86_64
+    }
+
+    /**
+     * Wine may be packaged as AArch64 or x86-64. WinMali's bundled x86-64
+     * Wine is executed through the separately installed AArch64 Box64 runtime.
+     */
+    public static boolean isSupportedWineElf(File file) {
+        return isAarch64Elf(file) || isX86_64Elf(file);
     }
 }

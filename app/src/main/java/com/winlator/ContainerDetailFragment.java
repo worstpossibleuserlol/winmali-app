@@ -15,6 +15,7 @@ import android.view.SubMenu;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
+import android.widget.CheckBox;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -46,6 +47,7 @@ import com.winlator.core.Callback;
 import com.winlator.container.DXWrapperPicker;
 import com.winlator.core.EnvVars;
 import com.winlator.core.FileUtils;
+import com.winlator.core.GpuCompatibilityProfile;
 import com.winlator.container.GraphicsDriverPicker;
 import com.winlator.core.KeyValueSet;
 import com.winlator.core.PreloaderDialog;
@@ -139,11 +141,58 @@ public class ContainerDetailFragment extends Fragment {
 
         final String oldGraphicsDriverConfig = isEditMode() ? container.getGraphicsDriverConfig() : "";
         String selectedGraphicsDriver = isEditMode() ? container.getGraphicsDriver() : GraphicsDrivers.getDefaultDriver(context);
-        GraphicsDriverPicker graphicsDriverPicker = new GraphicsDriverPicker(view.findViewById(R.id.LLGraphicsDriver), selectedGraphicsDriver, oldGraphicsDriverConfig);
+        final LinearLayout graphicsDriverContainer = view.findViewById(R.id.LLGraphicsDriver);
+        final LinearLayout dxWrapperContainer = view.findViewById(R.id.LLDXWrapper);
+        final GraphicsDriverPicker[] graphicsDriverPicker = new GraphicsDriverPicker[1];
+        graphicsDriverPicker[0] = new GraphicsDriverPicker(graphicsDriverContainer, selectedGraphicsDriver, oldGraphicsDriverConfig);
 
         String oldDXWrapperConfig = isEditMode() ? container.getDXWrapperConfig() : "";
         String selectedDXWrapper = isEditMode() ? container.getDXWrapper() : Container.DEFAULT_DXWRAPPER;
-        DXWrapperPicker dxwrapperPicker = new DXWrapperPicker(view.findViewById(R.id.LLDXWrapper), graphicsDriverPicker, selectedDXWrapper, oldDXWrapperConfig);
+        final DXWrapperPicker[] dxwrapperPicker = new DXWrapperPicker[1];
+        dxwrapperPicker[0] = new DXWrapperPicker(dxWrapperContainer, graphicsDriverPicker[0], selectedDXWrapper, oldDXWrapperConfig);
+
+        final CheckBox cbAutoGPUSettings = view.findViewById(R.id.CBAutoGPUSettings);
+        final TextView tvAutoGPUProfile = view.findViewById(R.id.TVAutoGPUProfile);
+        final GpuCompatibilityProfile[] detectedGPUProfile = new GpuCompatibilityProfile[1];
+        if (isEditMode()) {
+            view.findViewById(R.id.LLAutoGPUProfile).setVisibility(View.GONE);
+        }
+        else {
+            cbAutoGPUSettings.setChecked(preferences.getBoolean("auto_gpu_settings", true));
+            tvAutoGPUProfile.setText(cbAutoGPUSettings.isChecked() ?
+                R.string.gpu_profile_detecting : R.string.gpu_profile_manual);
+
+            Runnable applyDetectedProfile = () -> {
+                GpuCompatibilityProfile profile = detectedGPUProfile[0];
+                if (profile == null || !cbAutoGPUSettings.isChecked()) return;
+                graphicsDriverPicker[0] = new GraphicsDriverPicker(graphicsDriverContainer,
+                    profile.vulkanDriver+","+profile.openGLDriver, "");
+                dxwrapperPicker[0] = new DXWrapperPicker(dxWrapperContainer,
+                    graphicsDriverPicker[0], profile.dxWrapper, "");
+            };
+
+            cbAutoGPUSettings.setOnCheckedChangeListener((buttonView, checked) -> {
+                if (checked) {
+                    if (detectedGPUProfile[0] != null) {
+                        applyDetectedProfile.run();
+                        tvAutoGPUProfile.setText(detectedGPUProfile[0].getSummary());
+                    }
+                    else tvAutoGPUProfile.setText(R.string.gpu_profile_detecting);
+                }
+                else tvAutoGPUProfile.setText(R.string.gpu_profile_manual);
+            });
+
+            GpuCompatibilityProfile.detectAsync(context, profile -> {
+                Activity activity = getActivity();
+                if (activity == null) return;
+                activity.runOnUiThread(() -> {
+                    if (!isAdded() || getView() != view) return;
+                    detectedGPUProfile[0] = profile;
+                    tvAutoGPUProfile.setText(profile.getSummary());
+                    applyDetectedProfile.run();
+                });
+            });
+        }
 
         view.findViewById(R.id.BTHelpDXWrapper).setOnClickListener((v) -> AppUtils.showHelpBox(context, v, R.string.dxwrapper_help_content));
 
@@ -184,13 +233,17 @@ public class ContainerDetailFragment extends Fragment {
 
         view.findViewById(R.id.BTConfirm).setOnClickListener((v) -> {
             try {
+                if (!isEditMode() && cbAutoGPUSettings.isChecked() && detectedGPUProfile[0] == null) {
+                    Toast.makeText(context, R.string.gpu_profile_wait, Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 String name = etName.getText().toString();
                 String screenSize = getScreenSize(view);
                 String envVars = envVarsView.getEnvVars();
-                String graphicsDriver = graphicsDriverPicker.getGraphicsDriver();
-                String dxwrapper = dxwrapperPicker.getDXWrapper();
-                String dxwrapperConfig = dxwrapperPicker.getDXWrapperConfig();
-                String graphicsDriverConfig = graphicsDriverPicker.getGraphicsDriverConfig();
+                String graphicsDriver = graphicsDriverPicker[0].getGraphicsDriver();
+                String dxwrapper = dxwrapperPicker[0].getDXWrapper();
+                String dxwrapperConfig = dxwrapperPicker[0].getDXWrapperConfig();
+                String graphicsDriverConfig = graphicsDriverPicker[0].getGraphicsDriverConfig();
                 String audioDriverConfig = vAudioDriverConfig.getTag().toString();
                 String audioDriver = StringUtils.parseIdentifier(sAudioDriver.getSelectedItem());
                 String wincomponents = getWinComponents(view);
@@ -220,6 +273,14 @@ public class ContainerDetailFragment extends Fragment {
                     container.setStartupSelection(startupSelection);
                     container.setBox64Preset(box64Preset);
                     container.setDesktopTheme(desktopTheme);
+                    // Only opt out of launch-time automatic GPU fallback when the
+                    // user actually changed a graphics selection or its configuration.
+                    boolean graphicsSettingsChanged =
+                        !selectedGraphicsDriver.equals(graphicsDriver) ||
+                        !oldGraphicsDriverConfig.equals(graphicsDriverConfig) ||
+                        !selectedDXWrapper.equals(dxwrapper) ||
+                        !oldDXWrapperConfig.equals(dxwrapperConfig);
+                    if (graphicsSettingsChanged) container.putExtra("autoGpuSettings", "f");
                     if (!container.saveData()) {
                         AppUtils.showToast(context, R.string.unable_to_save_container_settings);
                         return;
@@ -233,6 +294,7 @@ public class ContainerDetailFragment extends Fragment {
                     getActivity().onBackPressed();
                 }
                 else {
+                    preferences.edit().putBoolean("auto_gpu_settings", cbAutoGPUSettings.isChecked()).apply();
                     JSONObject data = new JSONObject();
                     data.put("name", name);
                     data.put("screenSize", screenSize);
@@ -265,6 +327,11 @@ public class ContainerDetailFragment extends Fragment {
                             return;
                         }
                         this.container = container;
+                        container.putExtra("autoGpuSettings", cbAutoGPUSettings.isChecked() ? "t" : "f");
+                        if (!container.saveData()) {
+                            android.util.Log.w("WinMali-Containers",
+                                "Unable to persist the container's automatic GPU setting");
+                        }
                         saveWineRegistryKeys(view);
                         FragmentActivity activity = getActivity();
                         if (activity != null) activity.onBackPressed();

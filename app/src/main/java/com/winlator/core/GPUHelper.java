@@ -51,6 +51,13 @@ public abstract class GPUHelper {
         return info;
     }
 
+    private static boolean isGPUInformationEmpty(ArrayMap<String, String> information) {
+        return information == null ||
+            (android.text.TextUtils.isEmpty(information.get("renderer")) &&
+             android.text.TextUtils.isEmpty(information.get("vendor")) &&
+             android.text.TextUtils.isEmpty(information.get("version")));
+    }
+
     private static ArrayMap<String, String> loadGPUInformation(Context context) {
         FutureTask<ArrayMap<String, String>> task;
         synchronized (GPUHelper.class) {
@@ -69,7 +76,16 @@ public abstract class GPUHelper {
         // EGL probing must never block Android's UI thread.
         if (Looper.myLooper() == Looper.getMainLooper() && !task.isDone()) return emptyGPUInformation();
         try {
-            return task.get(GPU_INFO_WAIT_MS, TimeUnit.MILLISECONDS);
+            ArrayMap<String, String> information = task.get(GPU_INFO_WAIT_MS, TimeUnit.MILLISECONDS);
+            if (isGPUInformationEmpty(information)) {
+                // EGL can fail transiently before the app's graphics surface is ready.
+                // Do not permanently cache that empty result for the lifetime of the process.
+                synchronized (GPUHelper.class) {
+                    if (gpuInfoTask == task) gpuInfoTask = null;
+                }
+                return emptyGPUInformation();
+            }
+            return information;
         }
         catch (InterruptedException e) {
             Thread.currentThread().interrupt();

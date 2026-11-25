@@ -10,6 +10,8 @@ public class CompatibilityRuntimePackageTest {
         assertTrue(CompatibilityRuntimePackage.isValidVersionName("1.2.3.4"));
         assertTrue(CompatibilityRuntimePackage.isValidVersionName("0.4.6-rc1"));
         assertTrue(CompatibilityRuntimePackage.isValidVersionName("0.4.6+vendor1"));
+        // The supported VKD3D repository includes the upstream "3.0b" release tag.
+        assertTrue(CompatibilityRuntimePackage.isValidVersionName("3.0b"));
     }
 
     @Test
@@ -20,6 +22,17 @@ public class CompatibilityRuntimePackageTest {
         assertFalse(CompatibilityRuntimePackage.isValidVersionName("0.4/6"));
         assertFalse(CompatibilityRuntimePackage.isValidVersionName("0.4.6.."));
         assertFalse(CompatibilityRuntimePackage.isValidVersionName("0.4.6."));
+    }
+
+    @Test
+    public void comparesTaggedVersionsByTheirNumericSegments() {
+        assertTrue(CompatibilityRuntimePackage.compareVersionNames("3.0b", "2.14.1") > 0);
+        assertTrue(CompatibilityRuntimePackage.compareVersionNames("3.0b", "3.0") < 0);
+        assertTrue(CompatibilityRuntimePackage.compareVersionNames("10.0", "2.9") > 0);
+        assertTrue(CompatibilityRuntimePackage.compareVersionNames("3.0-rc2", "3.0-rc1") > 0);
+        assertEquals(0, CompatibilityRuntimePackage.compareVersionNames("3.0", "3.0.0"));
+        assertTrue(CompatibilityRuntimePackage.compareVersionNames(
+            "100000000000000000000000.0", "99999999999999999999999.9") > 0);
     }
 
     @Test

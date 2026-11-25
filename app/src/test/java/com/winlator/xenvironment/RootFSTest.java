@@ -23,6 +23,19 @@ public class RootFSTest {
         return header;
     }
 
+    private static byte[] x86_64ElfHeader() {
+        byte[] header = new byte[20];
+        header[0] = 0x7f;
+        header[1] = 'E';
+        header[2] = 'L';
+        header[3] = 'F';
+        header[4] = 2;
+        header[5] = 1;
+        header[18] = 62; // EM_X86_64, little-endian
+        header[19] = 0;
+        return header;
+    }
+
     private static void prepareWineLibraries(File wine) throws Exception {
         File x64 = new File(wine, "lib/wine/x86_64-windows");
         File x86 = new File(wine, "lib/wine/i386-windows");
@@ -79,7 +92,16 @@ public class RootFSTest {
     }
 
     @Test
-    public void acceptsCompleteWineRoot() throws Exception {
+    public void acceptsBundledX86_64WineRoot() throws Exception {
+        File wine = new File(temporaryFolder.getRoot(), "opt/wine");
+        assertTrue(new File(wine, "bin").mkdirs());
+        prepareWineLibraries(wine);
+        Files.write(new File(wine, "bin/wine").toPath(), x86_64ElfHeader());
+        assertTrue(RootFS.hasCoreWineFiles(temporaryFolder.getRoot()));
+    }
+
+    @Test
+    public void acceptsNativeAarch64WineRoot() throws Exception {
         File wine = new File(temporaryFolder.getRoot(), "opt/wine");
         assertTrue(new File(wine, "bin").mkdirs());
         prepareWineLibraries(wine);
@@ -88,11 +110,22 @@ public class RootFSTest {
     }
 
     @Test
-    public void acceptsWine64WhenWineShimIsAbsent() throws Exception {
+    public void acceptsX86_64Wine64WhenWineShimIsAbsent() throws Exception {
         File wine = new File(temporaryFolder.getRoot(), "opt/wine");
         assertTrue(new File(wine, "bin").mkdirs());
         prepareWineLibraries(wine);
-        Files.write(new File(wine, "bin/wine64").toPath(), aarch64ElfHeader());
+        Files.write(new File(wine, "bin/wine64").toPath(), x86_64ElfHeader());
         assertTrue(RootFS.hasCoreWineFiles(temporaryFolder.getRoot()));
+    }
+
+    @Test
+    public void rejectsUnsupportedWineElfArchitecture() throws Exception {
+        File wine = new File(temporaryFolder.getRoot(), "opt/wine");
+        assertTrue(new File(wine, "bin").mkdirs());
+        prepareWineLibraries(wine);
+        byte[] unsupported = x86_64ElfHeader();
+        unsupported[4] = 1; // ELF32 is not supported by this rootfs validator.
+        Files.write(new File(wine, "bin/wine").toPath(), unsupported);
+        assertFalse(RootFS.hasCoreWineFiles(temporaryFolder.getRoot()));
     }
 }

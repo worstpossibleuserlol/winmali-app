@@ -15,26 +15,29 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.SocketException;
 import java.net.InetSocketAddress;
-import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class WinHandler {
-    private static final short SERVER_PORT = 7947;
+    private static final int DEFAULT_SERVER_PORT = 7947;
     private static final short CLIENT_PORT = 7946;
-    private DatagramSocket socket;
+    private final int serverPort;
+    private volatile DatagramSocket socket;
+    private Thread receiveThread;
+    private Thread sendThread;
+    private final Object sendLock = new Object();
     protected final ByteBuffer sendData = ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN);
     protected final ByteBuffer receiveData = ByteBuffer.allocate(64).order(ByteOrder.LITTLE_ENDIAN);
     private final DatagramPacket sendPacket = new DatagramPacket(sendData.array(), sendData.capacity());
     private final DatagramPacket receivePacket = new DatagramPacket(receiveData.array(), receiveData.capacity());
     private final ArrayDeque<Runnable> actions = new ArrayDeque<>();
-    protected boolean initReceived = false;
-    private boolean running = false;
+    protected volatile boolean initReceived = false;
+    private volatile boolean running = false;
     private OnGetProcessInfoListener onGetProcessInfoListener;
     private OnPreExecListener onPreExecListener;
     private InetAddress localhost;
@@ -44,34 +47,57 @@ public class WinHandler {
     private Callback<String> requestCallback;
 
     public WinHandler(XServerDisplayActivity activity) {
+        this(activity, DEFAULT_SERVER_PORT);
+    }
+
+    WinHandler(XServerDisplayActivity activity, int serverPort) {
+        if (serverPort < 0 || serverPort > 65535) {
+            throw new IllegalArgumentException("Invalid WinHandler UDP port: "+serverPort);
+        }
         this.activity = activity;
+        this.serverPort = serverPort;
     }
 
     protected boolean sendPacket(int port) {
-        try {
-            int size = sendData.position();
-            if (size == 0) return false;
-            sendPacket.setAddress(localhost);
-            sendPacket.setPort(port);
-            socket.send(sendPacket);
-            return true;
-        }
-        catch (IOException e) {
-            return false;
+        synchronized (sendLock) {
+            DatagramSocket activeSocket = socket;
+            if (activeSocket == null || activeSocket.isClosed()) return false;
+            try {
+                int size = sendData.position();
+                if (size == 0) return false;
+                sendPacket.setData(sendData.array(), 0, size);
+                sendPacket.setAddress(localhost);
+                sendPacket.setPort(port);
+                activeSocket.send(sendPacket);
+                return true;
+            }
+            catch (IOException | RuntimeException error) {
+                return false;
+            }
+            finally {
+                sendPacket.setData(sendData.array(), 0, sendData.capacity());
+            }
         }
     }
 
     protected boolean sendPacket(int port, byte[] data) {
-        try {
-            sendPacket.setData(data);
-            sendPacket.setAddress(localhost);
-            sendPacket.setPort(port);
-            socket.send(sendPacket);
-            sendPacket.setData(sendData.array());
-            return true;
-        }
-        catch (IOException e) {
-            return false;
+        if (data == null || data.length == 0) return false;
+        synchronized (sendLock) {
+            DatagramSocket activeSocket = socket;
+            if (activeSocket == null || activeSocket.isClosed()) return false;
+            try {
+                sendPacket.setData(data);
+                sendPacket.setAddress(localhost);
+                sendPacket.setPort(port);
+                activeSocket.send(sendPacket);
+                return true;
+            }
+            catch (IOException | RuntimeException error) {
+                return false;
+            }
+            finally {
+                sendPacket.setData(sendData.array(), 0, sendData.capacity());
+            }
         }
     }
 
@@ -278,29 +304,47 @@ public class WinHandler {
     }
 
     private void startSendThread() {
-        Executors.newSingleThreadExecutor().execute(() -> {
+        sendThread = new Thread(() -> {
             while (running) {
                 synchronized (actions) {
-                    while (initReceived && !actions.isEmpty()) actions.poll().run();
+                    while (running && initReceived && !actions.isEmpty()) {
+                        actions.poll().run();
+                    }
+                    if (!running) break;
                     try {
                         actions.wait();
                     }
-                    catch (InterruptedException e) {}
+                    catch (InterruptedException error) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
                 }
             }
-        });
+        }, "WinMali-winhandler-send");
+        sendThread.setDaemon(true);
+        sendThread.start();
     }
 
-    public void stop() {
+    public synchronized void stop() {
         running = false;
+        initReceived = false;
 
-        if (socket != null) {
-            socket.close();
-            socket = null;
-        }
+        DatagramSocket activeSocket = socket;
+        socket = null;
+        if (activeSocket != null) activeSocket.close();
 
         synchronized (actions) {
-            actions.notify();
+            actions.clear();
+            actions.notifyAll();
+        }
+
+        if (receiveThread != null) {
+            receiveThread.interrupt();
+            receiveThread = null;
+        }
+        if (sendThread != null) {
+            sendThread.interrupt();
+            sendThread = null;
         }
 
         if (midiHandler != null) {
@@ -420,37 +464,91 @@ public class WinHandler {
         }
     }
 
-    public void start() {
+    int getBoundPort() {
+        DatagramSocket activeSocket = socket;
+        return activeSocket != null && !activeSocket.isClosed() ? activeSocket.getLocalPort() : -1;
+    }
+
+    private static void logSocketError(String message, Throwable error) {
         try {
-            localhost = InetAddress.getLocalHost();
+            android.util.Log.e("WinMali-WinHandler", message, error);
         }
-        catch (UnknownHostException e) {
-            try {
-                localhost = InetAddress.getByName("127.0.0.1");
-            }
-            catch (UnknownHostException ex) {}
+        catch (RuntimeException ignored) {
+            // Android's Log facade is not implemented in the plain JVM unit-test
+            // runtime. Logging must not turn a handled socket failure into a crash.
         }
+    }
 
-        running = true;
-        startSendThread();
-        Executors.newSingleThreadExecutor().execute(() -> {
+    /**
+     * Binds the guest-control socket before returning. The guest's winhandler.exe
+     * sends its INIT datagram as soon as Wine starts, so an asynchronous bind here
+     * creates a startup race in which the first handshake is silently lost.
+     */
+    public synchronized boolean start() {
+        if (running && socket != null && !socket.isClosed()) return true;
+
+        DatagramSocket newSocket = null;
+        try {
+            localhost = InetAddress.getByName("127.0.0.1");
+            newSocket = new DatagramSocket(null);
+            // This is a single-instance control endpoint. Do not allow two
+            // WinMali sessions to share the guest-control port.
+            newSocket.setReuseAddress(false);
+            newSocket.bind(new InetSocketAddress((InetAddress)null, serverPort));
+            socket = newSocket;
+            initReceived = false;
+            running = true;
+
+            startSendThread();
+            final DatagramSocket boundSocket = newSocket;
+            receiveThread = new Thread(() -> receiveLoop(boundSocket),
+                "WinMali-winhandler-receive");
+            receiveThread.setDaemon(true);
+            receiveThread.start();
+            return true;
+        }
+        catch (IOException | RuntimeException error) {
+            running = false;
+            initReceived = false;
+            socket = null;
+            if (newSocket != null) newSocket.close();
+            logSocketError("Unable to bind guest-control UDP port "+serverPort, error);
+            return false;
+        }
+    }
+
+    private void receiveLoop(DatagramSocket activeSocket) {
+        while (running && activeSocket == socket && !activeSocket.isClosed()) {
             try {
-                socket = new DatagramSocket(null);
-                socket.setReuseAddress(true);
-                socket.bind(new InetSocketAddress((InetAddress)null, SERVER_PORT));
+                // DatagramPacket keeps the length of the last received datagram.
+                // Restore the full buffer before every receive or the one-byte INIT
+                // packet truncates every subsequent guest-control message.
+                receiveData.clear();
+                receivePacket.setLength(receiveData.capacity());
+                activeSocket.receive(receivePacket);
+                if (receivePacket.getLength() < 1) continue;
 
-                while (running) {
-                    socket.receive(receivePacket);
-
-                    synchronized (actions) {
-                        receiveData.rewind();
-                        byte requestCode = receiveData.get();
-                        handleRequest(requestCode, receivePacket.getPort());
-                    }
+                synchronized (actions) {
+                    receiveData.position(0);
+                    receiveData.limit(receivePacket.getLength());
+                    byte requestCode = receiveData.get();
+                    handleRequest(requestCode, receivePacket.getPort());
+                    receiveData.clear();
                 }
             }
-            catch (IOException e) {}
-        });
+            catch (SocketException error) {
+                if (running) {
+                    logSocketError("Guest-control socket stopped unexpectedly", error);
+                }
+                break;
+            }
+            catch (IOException | RuntimeException error) {
+                if (running) {
+                    logSocketError("Unable to process guest-control datagram", error);
+                }
+                receiveData.clear();
+            }
+        }
     }
 
     public boolean onGenericMotionEvent(MotionEvent event) {
