@@ -22,15 +22,29 @@ public abstract class WineStartMenuCreator {
         else return MSLink.SW_SHOWNORMAL;
     }
 
-    private static void createMenuEntry(JSONObject item, File currentDir) throws JSONException {
+    private static boolean installEpicLauncherScript(Context context, Container container) {
+        if (context == null || container == null || container.getRootDir() == null) return false;
+
+        File installerDir = new File(container.getRootDir(), ".wine/drive_c/ProgramData/WinMali");
+        if (!installerDir.isDirectory() && !installerDir.mkdirs()) return false;
+
+        File installerScript = new File(installerDir, "EpicGamesLauncherInstaller.js");
+        return FileUtils.copy(context, "epic_launcher_installer.js", installerScript);
+    }
+
+    private static void createMenuEntry(JSONObject item, File currentDir, boolean epicInstallerReady) throws JSONException {
         if (item.has("children")) {
             currentDir = new File(currentDir, item.getString("name"));
             currentDir.mkdirs();
 
             JSONArray children = item.getJSONArray("children");
-            for (int i = 0; i < children.length(); i++) createMenuEntry(children.getJSONObject(i), currentDir);
+            for (int i = 0; i < children.length(); i++) {
+                createMenuEntry(children.getJSONObject(i), currentDir, epicInstallerReady);
+            }
         }
         else {
+            if ("epic-games-launcher".equals(item.optString("installer")) && !epicInstallerReady) return;
+
             File outputFile = new File(currentDir, item.getString("name")+".lnk");
             MSLink.LinkInfo linkInfo = new MSLink.LinkInfo();
             linkInfo.targetPath = item.getString("path");
@@ -70,10 +84,13 @@ public abstract class WineStartMenuCreator {
         File containerStartMenuFile = new File(container.getRootDir(), ".startmenu");
         removeOldMenu(containerStartMenuFile, startMenuDir);
 
+        boolean epicInstallerReady = installEpicLauncherScript(context, container);
         try {
             JSONArray data = new JSONArray(FileUtils.readString(context, "wine_startmenu.json"));
             FileUtils.writeString(containerStartMenuFile, data.toString());
-            for (int i = 0; i < data.length(); i++) createMenuEntry(data.getJSONObject(i), startMenuDir);
+            for (int i = 0; i < data.length(); i++) {
+                createMenuEntry(data.getJSONObject(i), startMenuDir, epicInstallerReady);
+            }
         }
         catch (JSONException e) {}
     }

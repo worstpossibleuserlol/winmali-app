@@ -82,6 +82,12 @@
                         "name" : "Steam (Legacy)",
                         "path" : "Z:/opt/apps/winaddons.exe",
                         "cmdArgs" : "-n \"Steam (Legacy)\" -d \"Steam\" -e \"steam.exe\""
+                    },
+                    {
+                        "name" : "Epic Games Launcher",
+                        "path" : "C:/windows/system32/wscript.exe",
+                        "cmdArgs" : "\"C:/ProgramData/WinMali/EpicGamesLauncherInstaller.js\"",
+                        "installer" : "epic-games-launcher"
                     }
                 ]
             }
