@@ -48,7 +48,7 @@
         }
 
         showMessage("Download complete. Starting the Epic Games Launcher setup.", "WinMali - Epic Games Launcher", 64);
-        var exitCode = shell.Run('msiexec.exe /i "' + installerPath + '"', 1, true);
+        var exitCode = shell.Run('"C:\\windows\\system32\\msiexec.exe" /i "' + installerPath + '"', 1, true);
         if (exitCode !== 0 && exitCode !== 3010) {
             throw new Error("Windows Installer returned exit code " + exitCode + ".");
         }
