@@ -226,7 +226,7 @@ jobs:
           data = executable.read_bytes()
           assert len(data) >= 256 and data[:2] == b"MZ", "TestD3D.exe is not a PE executable"
           pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
-          assert data[pe_offset:pe_offset + 4] == b"PE\\0\\0", "PE signature is missing"
+          assert data[pe_offset:pe_offset + 4] == b"PE\0\0", "PE signature is missing"
           machine = struct.unpack_from("<H", data, pe_offset + 4)[0]
           assert machine == 0x8664, f"Expected x86-64 PE, got 0x{machine:04x}"
           assert manifest["file"] == "TestD3D.exe"
@@ -250,7 +250,7 @@ jobs:
           output = pathlib.Path(sys.argv[1]).read_text(errors="replace")
           assert "The .rsrc Resource Directory section:" in output, "PE resource section is missing"
           section = output.split("The .rsrc Resource Directory section:", 1)[1]
-          ids = set(re.findall(r"(?m)^\\s*[0-9a-fA-F]+\\s+Entry: ID: (0x[0-9a-fA-F]+)", section))
+          ids = set(re.findall(r"(?m)^\s*[0-9a-fA-F]+\s+Entry: ID: (0x[0-9a-fA-F]+)", section))
           assert "0x000003" in ids, "Original Microsoft RT_ICON resources are missing"
           assert "0x00000e" in ids, "Original Microsoft RT_GROUP_ICON resource is missing"
           PY
