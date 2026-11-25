@@ -1027,7 +1027,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             }
             else if (dxwrapper.equals(DXWrappers.WINED3D)) {
                 String installedVersion = GeneralComponents.extractFileResolvedVersion(
-                    GeneralComponents.Type.WINED3D, this, wineD3DVersion, DefaultVersion.WINED3D);
+                    GeneralComponents.Type.WINED3D, this, wineD3DVersion, DefaultVersion.WINED3D, null);
                 if (installedVersion == null) return -1;
             }
             else {
@@ -1059,7 +1059,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         String installedVkd3d = GeneralComponents.extractFileResolvedVersion(
-            GeneralComponents.Type.VKD3D, this, vkd3dVersion, DefaultVersion.VKD3D);
+            GeneralComponents.Type.VKD3D, this, vkd3dVersion, DefaultVersion.VKD3D, null);
         if (installedVkd3d == null && dxwrapper.equals(DXWrappers.VKD3D)) return -1;
 
         File containerSysWoW64Dir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows/syswow64");
