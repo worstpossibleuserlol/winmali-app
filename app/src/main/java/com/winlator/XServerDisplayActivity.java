@@ -500,6 +500,22 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         ForegroundService.stopSession(this);
     }
 
+    /**
+     * A normal Wine/Box64 exit is the end of the guest session, not an Android
+     * application restart. Let the Activity lifecycle release the X server,
+     * process launcher, active-container lock and foreground service.
+     */
+    private void finishAfterGuestSessionExit(int status) {
+        android.util.Log.i("WinMali-Launch",
+            "Wine/Box64 guest session exited with status " + status + "; closing the session");
+
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed() ||
+                !exitRequested.compareAndSet(false, true)) return;
+            finish();
+        });
+    }
+
     private boolean setupWineSystemFiles() {
         String appVersion = String.valueOf(AppUtils.getVersionCode(this));
         String rfsVersion = String.valueOf(rootFS.getVersion());
@@ -713,12 +729,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         guestProgramLauncherComponent.setEnvVars(envVars);
-        guestProgramLauncherComponent.setTerminationCallback((status) -> {
-            android.util.Log.e("WinMali-Launch", "Wine/Box64 session exited with status "+status);
-            runOnUiThread(() -> {
-                if (!isFinishing() && !isDestroyed()) exit();
-            });
-        });
+        guestProgramLauncherComponent.setTerminationCallback(this::finishAfterGuestSessionExit);
         guestProgramLauncherComponent.setOutputCallback((line) ->
             android.util.Log.i("WinMali-Guest", line));
         environment.addComponent(guestProgramLauncherComponent);
