@@ -116,6 +116,35 @@ jobs:
           echo "7f005809a453916c77673f21d0ea709b0ef5a35a8631c072b3713fd4073c7c7e  $RUNNER_TEMP/AIO-Graphics-Test-64bit.exe" | sha256sum --check --strict
           file "$RUNNER_TEMP/AIO-Graphics-Test-64bit.exe" | grep -q "PE32+ executable.*x86-64"
 
+          # AIO Graphics Test compiles src/app.ico into the EXE as RT_ICON (3)
+          # and RT_GROUP_ICON (14). Verify the original upstream icon survived.
+          objdump -x "$RUNNER_TEMP/AIO-Graphics-Test-64bit.exe" > "$RUNNER_TEMP/AIO-Graphics-Test-resources.txt"
+          python - "$RUNNER_TEMP/AIO-Graphics-Test-resources.txt" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          output = pathlib.Path(sys.argv[1]).read_text()
+          assert "The .rsrc Resource Directory section:" in output, "PE resource section is missing"
+          resource_section = output.split("The .rsrc Resource Directory section:", 1)[1]
+          root_type_ids = set(re.findall(r"(?m)^[0-9a-fA-F]{3}   Entry: ID: (0x[0-9a-fA-F]+)", resource_section))
+          assert "0x000003" in root_type_ids, "AIO RT_ICON image resources are missing"
+          assert "0x00000e" in root_type_ids, "AIO RT_GROUP_ICON resource is missing"
+          PY
+
+          unzip -p "$APK" assets/wine_startmenu.json > "$RUNNER_TEMP/wine_startmenu.json"
+          python - "$RUNNER_TEMP/wine_startmenu.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          menu = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          system_tools = next(item for item in menu if item.get("name") == "System Tools")
+          direct3d = next(item for item in system_tools["children"] if item.get("name") == "Test Direct3D")
+          assert direct3d["path"] == "Z:/opt/apps/TestD3D.exe"
+          assert direct3d.get("iconLocation") == direct3d["path"], "Test Direct3D shortcut must read its icon from the AIO executable"
+          PY
+
           unzip -p "$APK" assets/test_direct3d/LICENSE > "$RUNNER_TEMP/AIO-Graphics-Test-LICENSE"
           unzip -p "$APK" assets/test_direct3d/CREDITS.md > "$RUNNER_TEMP/AIO-Graphics-Test-CREDITS.md"
           test -s "$RUNNER_TEMP/AIO-Graphics-Test-LICENSE"
