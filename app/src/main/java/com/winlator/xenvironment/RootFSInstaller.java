@@ -219,8 +219,8 @@ public abstract class RootFSInstaller {
                 }
             }
 
-            // Preserve the upstream Apache-2.0 license and project attributions
-            // beside the executable so they remain available inside the container.
+            // Preserve the upstream MIT license and project attributions beside the
+            // executable so they remain available inside the container.
             copyDirect3DTestSidecar(context, appsDir, "test_direct3d/LICENSE", "TestD3D-LICENSE.txt");
             copyDirect3DTestSidecar(context, appsDir, "test_direct3d/CREDITS.md", "TestD3D-CREDITS.md");
         }
