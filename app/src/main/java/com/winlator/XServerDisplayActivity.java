@@ -989,81 +989,181 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     }
 
     private boolean extractDXWrapperFiles() {
-        String cacheId = "";
+        String defaultWrapperVersion = dxwrapper.equals(DXWrappers.DXVK) ?
+            DefaultVersion.DXVK(graphicsDriver[0]) : DefaultVersion.WINED3D;
+        String wrapperVersion = dxwrapper.equals(DXWrappers.DXVK) ||
+                dxwrapper.equals(DXWrappers.WINED3D) ?
+            DXWrappers.resolveVersion(dxwrapperConfig[0].get("version"), defaultWrapperVersion) : "";
+        String vkd3dVersion = DXWrappers.resolveVersion(
+            dxwrapperConfig[1].get("version"), DefaultVersion.VKD3D);
+        String ddrawWrapper = DXWrappers.resolveVersion(
+            dxwrapperConfig[0].get("ddrawWrapper"), DXWrappers.WINED3D);
+
+        String cacheId = DXWrappers.createInstallCacheId(
+            dxwrapper, wrapperVersion, vkd3dVersion, ddrawWrapper);
+
         if (dxwrapper.equals(DXWrappers.DXVK)) {
             DXVKConfigDialog.setEnvVars(this, dxwrapperConfig[0], envVars);
-            cacheId += dxwrapper+"-"+dxwrapperConfig[0].get("version", DefaultVersion.DXVK(graphicsDriver[0]));
         }
         else if (dxwrapper.equals(DXWrappers.WINED3D)) {
             WineD3DConfigDialog.setEnvVars(dxwrapperConfig[0], envVars);
-            cacheId += dxwrapper+"-"+dxwrapperConfig[0].get("version", DefaultVersion.WINED3D);
         }
 
-        String ddrawWrapper = dxwrapperConfig[0].get("ddrawWrapper", DXWrappers.WINED3D);
-        cacheId += "-"+DXWrappers.VKD3D+"-"+dxwrapperConfig[1].get("version", DefaultVersion.VKD3D)+"-"+ddrawWrapper;
-        boolean changed = !cacheId.equals(container.getExtra("dxwrapper"));
         VKD3DConfigDialog.setEnvVars(dxwrapperConfig[1], envVars);
+        if (ddrawWrapper.equals(DXWrappers.CNC_DDRAW)) {
+            envVars.put("CNC_DDRAW_CONFIG_FILE", "C:\\ProgramData\\cnc-ddraw\\ddraw.ini");
+        }
 
-        if (ddrawWrapper.equals(DXWrappers.CNC_DDRAW)) envVars.put("CNC_DDRAW_CONFIG_FILE", "C:\\ProgramData\\cnc-ddraw\\ddraw.ini");
-
+        // Older builds wrote this marker before checking extraction results. The
+        // schema change invalidates those markers, and missing DLLs trigger repair.
+        boolean changed = !cacheId.equals(container.getExtra("dxwrapper")) ||
+            !areDXWrapperFilesPresent();
         if (!changed) return false;
-        container.putExtra("dxwrapper", cacheId);
 
         File rootDir = rootFS.getRootDir();
         File windowsDir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows");
+        boolean wrapperInstalled = true;
 
         if (dxwrapper.equals(DXWrappers.WINED3D)) {
-            String version = dxwrapperConfig[0].get("version", DefaultVersion.WINED3D);
-            if (version.equals(WineInfo.MAIN_WINE_VERSION)) {
-                final String[] dlls = {"d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll", "d3d10core.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll", "dxgi.dll", "ddraw.dll", "wined3d.dll"};
-                restoreBuiltinDllFiles(dlls);
+            if (wrapperVersion.equals(WineInfo.MAIN_WINE_VERSION)) {
+                final String[] dlls = {
+                    "d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll",
+                    "d3d10core.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll",
+                    "dxgi.dll", "ddraw.dll", "wined3d.dll"
+                };
+                wrapperInstalled = restoreBuiltinDllFilesVerified(dlls);
             }
-            else GeneralComponents.extractFile(GeneralComponents.Type.WINED3D, this, version, DefaultVersion.WINED3D);
+            else {
+                String installedVersion = GeneralComponents.extractFileResolvedVersion(
+                    GeneralComponents.Type.WINED3D, this, wrapperVersion,
+                    DefaultVersion.WINED3D);
+                wrapperInstalled = installedVersion != null;
+            }
+            wrapperInstalled = wrapperInstalled && areWindowsDllsPresent(
+                "d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll",
+                "d3d11.dll", "dxgi.dll", "wined3d.dll");
         }
         else if (dxwrapper.equals(DXWrappers.DXVK)) {
             final boolean[] hasD3D8DllFile = {false};
             final boolean[] hasD3D10DllFile = {false};
 
-            GeneralComponents.extractFile(GeneralComponents.Type.DXVK, this, dxwrapperConfig[0].get("version"), DefaultVersion.DXVK(graphicsDriver[0]), (destination, size) -> {
-                String name = destination.getName();
-                if (name.equals("d3d10.dll")) {
-                    hasD3D10DllFile[0] = true;
-                }
-                else if (name.equals("d3d8.dll")) {
-                    hasD3D8DllFile[0] = true;
-                }
-                return destination;
-            });
+            String installedVersion = GeneralComponents.extractFileResolvedVersion(
+                GeneralComponents.Type.DXVK, this, wrapperVersion,
+                DefaultVersion.DXVK(graphicsDriver[0]), (destination, size) -> {
+                    String name = destination.getName();
+                    if (name.equals("d3d10.dll")) hasD3D10DllFile[0] = true;
+                    else if (name.equals("d3d8.dll")) hasD3D8DllFile[0] = true;
+                    return destination;
+                });
+            wrapperInstalled = installedVersion != null;
 
-            if (!hasD3D8DllFile[0]) {
-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "dxwrapper/d8vk-"+DefaultVersion.D8VK+".tzst", windowsDir);
+            if (wrapperInstalled && !hasD3D8DllFile[0]) {
+                wrapperInstalled = TarCompressorUtils.extract(
+                    TarCompressorUtils.Type.ZSTD, this,
+                    "dxwrapper/d8vk-"+DefaultVersion.D8VK+".tzst", windowsDir) &&
+                    areWindowsDllsPresent("d3d8.dll");
             }
-            if (!hasD3D10DllFile[0]) restoreBuiltinDllFiles("d3d10.dll", "d3d10_1.dll");
+
+            if (wrapperInstalled && !hasD3D10DllFile[0]) {
+                wrapperInstalled = restoreBuiltinDllFilesVerified(
+                    "d3d10.dll", "d3d10_1.dll");
+            }
+
+            wrapperInstalled = wrapperInstalled && areWindowsDllsPresent(
+                "d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll",
+                "d3d11.dll", "dxgi.dll");
         }
 
-        GeneralComponents.extractFile(GeneralComponents.Type.VKD3D, this, dxwrapperConfig[1].get("version"), DefaultVersion.VKD3D);
+        String installedVkd3dVersion = GeneralComponents.extractFileResolvedVersion(
+            GeneralComponents.Type.VKD3D, this, vkd3dVersion, DefaultVersion.VKD3D);
+        boolean vkd3dInstalled = installedVkd3dVersion != null &&
+            areWindowsDllsPresent("d3d12.dll");
 
-        File containerSysWoW64Dir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/windows/syswow64");
+        File containerSysWoW64Dir = new File(rootDir,
+            RootFS.WINEPREFIX+"/drive_c/windows/syswow64");
         FileUtils.delete(new File(containerSysWoW64Dir, "ddraw_.dll"));
 
+        boolean ddrawInstalled;
         switch (ddrawWrapper) {
-            case DXWrappers.CNC_DDRAW:
+            case DXWrappers.CNC_DDRAW: {
                 final String assetDir = "dxwrapper/cnc-ddraw-"+DefaultVersion.CNC_DDRAW;
-                File configFile = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/ProgramData/cnc-ddraw/ddraw.ini");
-                if (!configFile.isFile()) FileUtils.copy(this, assetDir+"/ddraw.ini", configFile);
-                File shadersDir = new File(rootDir, RootFS.WINEPREFIX+"/drive_c/ProgramData/cnc-ddraw/Shaders");
+                File configFile = new File(rootDir,
+                    RootFS.WINEPREFIX+"/drive_c/ProgramData/cnc-ddraw/ddraw.ini");
+                ddrawInstalled = configFile.isFile() ||
+                    FileUtils.copy(this, assetDir+"/ddraw.ini", configFile);
+
+                File shadersDir = new File(rootDir,
+                    RootFS.WINEPREFIX+"/drive_c/ProgramData/cnc-ddraw/Shaders");
                 FileUtils.delete(shadersDir);
-                FileUtils.copy(this, assetDir+"/Shaders", shadersDir);
-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, assetDir+"/ddraw.tzst", windowsDir);
+                ddrawInstalled = ddrawInstalled &&
+                    FileUtils.copy(this, assetDir+"/Shaders", shadersDir);
+                ddrawInstalled = ddrawInstalled && TarCompressorUtils.extract(
+                    TarCompressorUtils.Type.ZSTD, this, assetDir+"/ddraw.tzst", windowsDir);
+                ddrawInstalled = ddrawInstalled && areWindowsDllsPresent("ddraw.dll");
                 break;
-            case DXWrappers.D7VK:
-                restoreBuiltinDllFiles("ddraw.dll");
-                (new File(containerSysWoW64Dir, "ddraw.dll")).renameTo(new File(containerSysWoW64Dir, "ddraw_.dll"));
-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "dxwrapper/d7vk-"+DefaultVersion.D7VK+".tzst", windowsDir);
+            }
+            case DXWrappers.D7VK: {
+                ddrawInstalled = restoreBuiltinDllFilesVerified("ddraw.dll");
+                File originalDdraw = new File(containerSysWoW64Dir, "ddraw.dll");
+                File renamedDdraw = new File(containerSysWoW64Dir, "ddraw_.dll");
+                if (ddrawInstalled && originalDdraw.isFile()) {
+                    ddrawInstalled = originalDdraw.renameTo(renamedDdraw);
+                }
+                if (ddrawInstalled) {
+                    ddrawInstalled = TarCompressorUtils.extract(
+                        TarCompressorUtils.Type.ZSTD, this,
+                        "dxwrapper/d7vk-"+DefaultVersion.D7VK+".tzst", windowsDir) &&
+                        areWindowsDllsPresent("ddraw.dll");
+                }
                 break;
+            }
             default:
-                restoreBuiltinDllFiles("ddraw.dll");
+                ddrawInstalled = restoreBuiltinDllFilesVerified("ddraw.dll");
                 break;
+        }
+
+        if (!DXWrappers.isInstallComplete(wrapperInstalled, vkd3dInstalled, ddrawInstalled)) {
+            android.util.Log.e("WinMali-Direct3D",
+                "Direct3D component installation incomplete; cache marker was not updated. " +
+                "The installer will retry on the next launch.");
+            return false;
+        }
+
+        // Persist only after every requested layer has been extracted and checked.
+        container.putExtra("dxwrapper", cacheId);
+        android.util.Log.i("WinMali-Direct3D",
+            "Installed "+dxwrapper+" "+wrapperVersion+" and VKD3D "+installedVkd3dVersion);
+        return true;
+    }
+
+    private boolean areDXWrapperFilesPresent() {
+        boolean wrapperPresent = true;
+        if (dxwrapper.equals(DXWrappers.DXVK)) {
+            wrapperPresent = areWindowsDllsPresent(
+                "d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll",
+                "d3d11.dll", "dxgi.dll");
+        }
+        else if (dxwrapper.equals(DXWrappers.WINED3D)) {
+            wrapperPresent = areWindowsDllsPresent(
+                "d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll",
+                "d3d11.dll", "dxgi.dll", "wined3d.dll");
+        }
+        return wrapperPresent && areWindowsDllsPresent("d3d12.dll", "ddraw.dll");
+    }
+
+    private boolean restoreBuiltinDllFilesVerified(final String... dlls) {
+        restoreBuiltinDllFiles(dlls);
+        return areWindowsDllsPresent(dlls);
+    }
+
+    private boolean areWindowsDllsPresent(final String... dlls) {
+        File windowsDir = new File(rootFS.getRootDir(),
+            RootFS.WINEPREFIX+"/drive_c/windows");
+        File system32Dir = new File(windowsDir, "system32");
+        File sysWoW64Dir = new File(windowsDir, "syswow64");
+        for (String dll : dlls) {
+            if (!new File(system32Dir, dll).isFile() ||
+                    !new File(sysWoW64Dir, dll).isFile()) return false;
         }
         return true;
     }

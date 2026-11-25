@@ -43,13 +43,13 @@ public class DXVKConfigDialog extends ContentDialog {
         GPUCardAdapter adapter = new GPUCardAdapter(context, android.R.layout.simple_spinner_dropdown_item, R.string.none);
         sCustomDevice.setAdapter(adapter);
 
-        String customDevice = config.get("customDevice");
-        if (customDevice.contains(":")) {
+        String[] customDeviceParts = DXWrappers.parseCustomDevice(config.get("customDevice"));
+        if (customDeviceParts != null) {
             try {
-                int deviceId = Integer.parseInt(customDevice.split(":")[0], 16);
+                int deviceId = Integer.parseInt(customDeviceParts[0], 16);
                 sCustomDevice.setSelection(adapter.getPositionByDeviceId(deviceId));
             }
-            catch (NumberFormatException e) {}
+            catch (NumberFormatException ignored) {}
         }
 
         setOnConfirmCallback(() -> {
@@ -100,9 +100,8 @@ public class DXVKConfigDialog extends ContentDialog {
             content += "d3d9.maxFrameRate = "+framerate+"\n";
         }
 
-        String customDevice = config.get("customDevice");
-        if (customDevice.contains(":")) {
-            String[] parts = customDevice.split(":");
+        String[] parts = DXWrappers.parseCustomDevice(config.get("customDevice"));
+        if (parts != null) {
             content += "dxgi.customDeviceId = "+parts[0]+"\n";
             content += "dxgi.customVendorId = "+parts[1]+"\n";
 
