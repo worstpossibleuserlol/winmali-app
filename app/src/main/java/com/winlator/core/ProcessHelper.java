@@ -460,6 +460,32 @@ public abstract class ProcessHelper {
         return descendants;
     }
 
+    /**
+     * Returns every descendant of a process, not just its direct children.
+     * This is used to shut down the Wine/Box64 process tree before a prefix is
+     * removed.
+     */
+    public static List<PStat> getDescendantProcesses(int rootPID) {
+        if (rootPID <= 0) return Collections.emptyList();
+
+        File procFile = new File("/proc");
+        String[] pids = procFile.list((file, name) ->
+            (new File(file, name)).isDirectory() && name.matches("[0-9]+"));
+        if (pids == null) return Collections.emptyList();
+
+        ArrayList<PStat> processes = new ArrayList<>();
+        for (String pid : pids) {
+            try {
+                PStat pstat = parseProcessStat(FileUtils.readString(new File("/proc/" + pid + "/stat")));
+                if (pstat != null) processes.add(pstat);
+            }
+            catch (RuntimeException ignored) {
+                // A process may exit while /proc is being enumerated.
+            }
+        }
+        return collectDescendants(processes, rootPID);
+    }
+
     public static List<PStat> getChildProcesses() {
         File procFile = new File("/proc");
         String[] pids = procFile.list((file, name) -> (new File(file, name)).isDirectory() && name.matches("[0-9]+"));

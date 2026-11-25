@@ -38,6 +38,7 @@
     <string name="container_export_failed">Unable to export this container. Stop its active session and try again.</string>
     <string name="container_import_failed">Unable to import this backup. Check that it is a valid WinMali container archive and that its Wine runtime is installed.</string>
     <string name="cannot_remove_active_container">Cannot remove the active container. Stop its session first.</string>
+    <string name="container_remove_failed">Could not remove this container. Please try again.</string>
     <string name="duplicating_container">Duplicating Container...</string>
     <string name="container_imported">Container imported.</string>
     <string name="installing_system_files">Installing System Files...</string>
