@@ -52,10 +52,24 @@ jobs:
           nuget restore "directx-sdk-samples/C++/Direct3D/EmptyProject/EmptyProject_2022.sln" -PackagesDirectory "directx-sdk-samples/C++/packages"
           if ($LASTEXITCODE -ne 0) { throw "NuGet restore failed" }
 
+      - name: Configure static C runtime for the upstream sample
+        shell: pwsh
+        run: |
+          $project = "directx-sdk-samples/C++/Direct3D/EmptyProject/EmptyProject_2022.vcxproj"
+          $xml = [System.IO.File]::ReadAllText($project)
+          $dynamicRuntime = "<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>"
+          $staticRuntime = "<RuntimeLibrary>MultiThreaded</RuntimeLibrary>"
+          $matches = ([regex]::Matches($xml, [regex]::Escape($dynamicRuntime))).Count
+          if ($matches -lt 1) { throw "Expected MSVC dynamic runtime settings were not found in the pinned sample project" }
+          $xml = $xml.Replace($dynamicRuntime, $staticRuntime)
+          [System.IO.File]::WriteAllText($project, $xml, [System.Text.UTF8Encoding]::new($false))
+          if ($xml.Contains($dynamicRuntime)) { throw "Failed to switch the sample project to the static C runtime" }
+          Write-Host "Changed $matches upstream project runtime configurations to static CRT for the Release build"
+
       - name: Build Direct3D 9 EmptyProject x64
         shell: pwsh
         run: |
-          msbuild "directx-sdk-samples/C++/Direct3D/EmptyProject/EmptyProject_2022.sln" /m /verbosity:minimal /p:Configuration=Release /p:Platform=x64 /p:RuntimeLibrary=MultiThreaded
+          msbuild "directx-sdk-samples/C++/Direct3D/EmptyProject/EmptyProject_2022.sln" /m /verbosity:minimal /p:Configuration=Release /p:Platform=x64
           if ($LASTEXITCODE -ne 0) { throw "Microsoft Direct3D 9 sample build failed" }
 
       - name: Package and validate upstream test executable
