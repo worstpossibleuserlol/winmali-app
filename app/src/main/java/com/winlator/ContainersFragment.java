@@ -222,7 +222,7 @@ public class ContainersFragment extends Fragment {
                             manager.removeContainerAsync(container, (removed) -> {
                                 preloaderDialog.close();
                                 if (!removed) {
-                                    Toast.makeText(getContext(), R.string.cannot_remove_active_container, Toast.LENGTH_LONG).show();
+                                    Toast.makeText(getContext(), R.string.container_remove_failed, Toast.LENGTH_LONG).show();
                                 }
                                 loadContainersList();
                             });
