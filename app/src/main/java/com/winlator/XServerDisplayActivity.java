@@ -1061,7 +1061,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                 wrapperInstalled = TarCompressorUtils.extract(
                     TarCompressorUtils.Type.ZSTD, this,
                     "dxwrapper/d8vk-"+DefaultVersion.D8VK+".tzst", windowsDir) &&
-                    areWindowsDllsPresent("d3d8.dll");
+                    areSysWoW64DllsPresent("d3d8.dll");
             }
 
             if (wrapperInstalled && !hasD3D10DllFile[0]) {
@@ -1069,9 +1069,9 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                     "d3d10.dll", "d3d10_1.dll");
             }
 
-            wrapperInstalled = wrapperInstalled && areWindowsDllsPresent(
-                "d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll",
-                "d3d11.dll", "dxgi.dll");
+            wrapperInstalled = wrapperInstalled && areSysWoW64DllsPresent("d3d8.dll") &&
+                areWindowsDllsPresent(
+                    "d3d9.dll", "d3d10.dll", "d3d10_1.dll", "d3d11.dll", "dxgi.dll");
         }
 
         String installedVkd3dVersion = GeneralComponents.extractFileResolvedVersion(
@@ -1139,9 +1139,9 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     private boolean areDXWrapperFilesPresent() {
         boolean wrapperPresent = true;
         if (dxwrapper.equals(DXWrappers.DXVK)) {
-            wrapperPresent = areWindowsDllsPresent(
-                "d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll",
-                "d3d11.dll", "dxgi.dll");
+            wrapperPresent = areSysWoW64DllsPresent("d3d8.dll") &&
+                areWindowsDllsPresent(
+                    "d3d9.dll", "d3d10.dll", "d3d10_1.dll", "d3d11.dll", "dxgi.dll");
         }
         else if (dxwrapper.equals(DXWrappers.WINED3D)) {
             wrapperPresent = areWindowsDllsPresent(
@@ -1154,6 +1154,15 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     private boolean restoreBuiltinDllFilesVerified(final String... dlls) {
         restoreBuiltinDllFiles(dlls);
         return areWindowsDllsPresent(dlls);
+    }
+
+    private boolean areSysWoW64DllsPresent(final String... dlls) {
+        File sysWoW64Dir = new File(rootFS.getRootDir(),
+            RootFS.WINEPREFIX+"/drive_c/windows/syswow64");
+        for (String dll : dlls) {
+            if (!new File(sysWoW64Dir, dll).isFile()) return false;
+        }
+        return true;
     }
 
     private boolean areWindowsDllsPresent(final String... dlls) {
