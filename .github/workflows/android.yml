@@ -28,8 +28,135 @@ permissions:
   contents: read
 
 jobs:
+  build-direct3d-test:
+    name: Build upstream Microsoft Direct3D 9 test
+    runs-on: windows-latest
+    steps:
+      - name: Check out pinned Microsoft DirectX SDK samples
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/DirectX-SDK-Samples
+          ref: 07e3eaa10e7dd026ec9d95fe326db2d5c4227e1b
+          path: directx-sdk-samples
+          persist-credentials: false
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Set up NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore DirectX SDK sample dependencies
+        shell: pwsh
+        run: |
+          nuget restore "directx-sdk-samples/C++/Direct3D/EmptyProject/EmptyProject_2022.sln" -PackagesDirectory "directx-sdk-samples/C++/packages"
+          if ($LASTEXITCODE -ne 0) { throw "NuGet restore failed" }
+
+      - name: Configure static C runtime for the upstream sample
+        shell: pwsh
+        run: |
+          $project = "directx-sdk-samples/C++/Direct3D/EmptyProject/EmptyProject_2022.vcxproj"
+          $xml = [System.IO.File]::ReadAllText($project)
+          $dynamicRuntime = "<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>"
+          $staticRuntime = "<RuntimeLibrary>MultiThreaded</RuntimeLibrary>"
+          $matches = ([regex]::Matches($xml, [regex]::Escape($dynamicRuntime))).Count
+          if ($matches -lt 1) { throw "Expected MSVC dynamic runtime settings were not found in the pinned sample project" }
+          $xml = $xml.Replace($dynamicRuntime, $staticRuntime)
+          [System.IO.File]::WriteAllText($project, $xml, [System.Text.UTF8Encoding]::new($false))
+          if ($xml.Contains($dynamicRuntime)) { throw "Failed to switch the sample project to the static C runtime" }
+          Write-Host "Changed $matches upstream project runtime configurations to static CRT for the Release build"
+
+      - name: Build Direct3D 9 EmptyProject x64
+        shell: pwsh
+        run: |
+          msbuild "directx-sdk-samples/C++/Direct3D/EmptyProject/EmptyProject_2022.sln" /m /verbosity:minimal /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw "Microsoft Direct3D 9 sample build failed" }
+
+      - name: Package and validate upstream test executable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $built = Get-ChildItem "directx-sdk-samples/C++/Direct3D/EmptyProject" -Filter "EmptyProject.exe" -Recurse |
+            Where-Object { $_.FullName -match "[\\/]x64[\\/]Release[\\/]" } |
+            Select-Object -First 1
+          if (-not $built) { throw "Built x64 Release EmptyProject.exe was not found" }
+
+          $output = Join-Path $env:GITHUB_WORKSPACE "direct3d-test-artifact"
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          $exe = Join-Path $output "TestD3D.exe"
+          Copy-Item $built.FullName $exe -Force
+
+          $bytes = [System.IO.File]::ReadAllBytes($exe)
+          if ($bytes.Length -lt 256 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+            throw "TestD3D.exe is not a valid PE executable"
+          }
+          $peOffset = [System.BitConverter]::ToInt32($bytes, 0x3C)
+          if ($peOffset -lt 64 -or $peOffset + 6 -gt $bytes.Length) {
+            throw "PE header offset is invalid"
+          }
+          if ($bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45) {
+            throw "PE signature is missing"
+          }
+          $machine = [System.BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          if ($machine -ne 0x8664) {
+            throw ("Expected x86-64 (0x8664), got 0x{0:X4}" -f $machine)
+          }
+
+          $item = Get-Item $exe
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $manifest = [ordered]@{
+            file = "TestD3D.exe"
+            size = [long]$item.Length
+            sha256 = $hash
+            architecture = "x86_64"
+            api = "Direct3D 9"
+            sourceRepository = "microsoft/DirectX-SDK-Samples"
+            sourceCommit = "07e3eaa10e7dd026ec9d95fe326db2d5c4227e1b"
+            sourcePath = "C++/Direct3D/EmptyProject"
+          }
+          [System.IO.File]::WriteAllText(
+            (Join-Path $output "manifest.json"),
+            ($manifest | ConvertTo-Json -Depth 4),
+            [System.Text.UTF8Encoding]::new($false)
+          )
+          Copy-Item "directx-sdk-samples/LICENSE" (Join-Path $output "LICENSE") -Force
+
+          $credits = @"
+          # Test Direct3D
+
+          This executable is built from Microsoft's upstream DirectX SDK EmptyProject sample.
+
+          - Source: https://github.com/microsoft/DirectX-SDK-Samples
+          - Pinned source commit: 07e3eaa10e7dd026ec9d95fe326db2d5c4227e1b
+          - Source directory: C++/Direct3D/EmptyProject
+          - API: Direct3D 9
+          - Architecture: x86-64
+
+          The sample creates a Direct3D 9 device, clears the render target to a blue colour, and presents frames.
+          Its original icon is compiled from Microsoft's C++/DXUT/Optional/directx.ico through EmptyProject.rc.
+          The source repository is distributed under the MIT License; see LICENSE.
+          "@
+          [System.IO.File]::WriteAllText(
+            (Join-Path $output "CREDITS.md"),
+            $credits,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+          if ((Get-Item (Join-Path $output "LICENSE")).Length -eq 0) { throw "MIT license file is missing" }
+          if ((Get-Item (Join-Path $output "CREDITS.md")).Length -eq 0) { throw "Credits file is missing" }
+          Write-Host "Packaged $($item.Length) bytes; SHA-256 $hash"
+
+      - name: Upload Direct3D 9 test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Microsoft-Direct3D9-Test
+          path: direct3d-test-artifact/
+          if-no-files-found: error
+          retention-days: 14
+
   build:
     name: Build and test Android app
+    needs: build-direct3d-test
     runs-on: ubuntu-latest
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
@@ -37,6 +164,12 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+
+      - name: Download Microsoft Direct3D 9 test
+        uses: actions/download-artifact@v4
+        with:
+          name: Microsoft-Direct3D9-Test
+          path: app/src/main/assets/test_direct3d
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -62,22 +195,6 @@ jobs:
             "ndk;24.0.8215888" \
             "cmake;3.22.1"
 
-      - name: Fetch pinned AIO Graphics Test 2.3.1 (x64)
-        run: |
-          mkdir -p app/src/main/assets/test_direct3d
-          curl --fail --location --retry 3 --retry-all-errors \
-            "https://github.com/The412Banner/AIO-Graphics-Test/releases/download/2.3.1/AIO-Graphics-Test-64bit.exe" \
-            -o app/src/main/assets/test_direct3d/AIO-Graphics-Test-64bit.exe
-          echo "7f005809a453916c77673f21d0ea709b0ef5a35a8631c072b3713fd4073c7c7e  app/src/main/assets/test_direct3d/AIO-Graphics-Test-64bit.exe" | sha256sum --check --strict
-          curl --fail --location --retry 3 --retry-all-errors \
-            "https://raw.githubusercontent.com/The412Banner/AIO-Graphics-Test/50ec41e4484d44eb5c05969396c1091c1bd9a1b3/LICENSE" \
-            -o app/src/main/assets/test_direct3d/LICENSE
-          curl --fail --location --retry 3 --retry-all-errors \
-            "https://raw.githubusercontent.com/The412Banner/AIO-Graphics-Test/50ec41e4484d44eb5c05969396c1091c1bd9a1b3/CREDITS.md" \
-            -o app/src/main/assets/test_direct3d/CREDITS.md
-          test -s app/src/main/assets/test_direct3d/LICENSE
-          test -s app/src/main/assets/test_direct3d/CREDITS.md
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
@@ -86,17 +203,9 @@ jobs:
           chmod +x ./gradlew
           ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug
 
-      - name: Upload unit test reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: WinMali-unit-test-reports
-          path: app/build/test-results/testDebugUnitTest/*.xml
-          if-no-files-found: ignore
-          retention-days: 7
-
       - name: Verify APK output and bundled system assets
         run: |
+          set -euo pipefail
           APK=app/build/outputs/apk/debug/WinMali_2.0.0.apk
           test -s "$APK"
           file "$APK"
@@ -111,25 +220,61 @@ jobs:
           PATTERN_MAGIC="$(od -An -tx1 -N4 "$RUNNER_TEMP/container_pattern.tzst" | tr -d ' \\n')"
           test "$PATTERN_MAGIC" = "28b52ffd"
 
-          unzip -p "$APK" assets/test_direct3d/AIO-Graphics-Test-64bit.exe > "$RUNNER_TEMP/AIO-Graphics-Test-64bit.exe"
-          test -s "$RUNNER_TEMP/AIO-Graphics-Test-64bit.exe"
-          echo "7f005809a453916c77673f21d0ea709b0ef5a35a8631c072b3713fd4073c7c7e  $RUNNER_TEMP/AIO-Graphics-Test-64bit.exe" | sha256sum --check --strict
-          file "$RUNNER_TEMP/AIO-Graphics-Test-64bit.exe" | grep -q "PE32+ executable.*x86-64"
+          unzip -p "$APK" assets/test_direct3d/TestD3D.exe > "$RUNNER_TEMP/TestD3D.exe"
+          unzip -p "$APK" assets/test_direct3d/manifest.json > "$RUNNER_TEMP/direct3d-manifest.json"
+          unzip -p "$APK" assets/test_direct3d/LICENSE > "$RUNNER_TEMP/Microsoft-DirectX-SDK-LICENSE"
+          unzip -p "$APK" assets/test_direct3d/CREDITS.md > "$RUNNER_TEMP/Microsoft-DirectX-SDK-CREDITS.md"
+          test -s "$RUNNER_TEMP/TestD3D.exe"
+          test -s "$RUNNER_TEMP/Microsoft-DirectX-SDK-LICENSE"
+          test -s "$RUNNER_TEMP/Microsoft-DirectX-SDK-CREDITS.md"
 
-          # AIO Graphics Test compiles src/app.ico into the EXE as RT_ICON (3)
-          # and RT_GROUP_ICON (14). Verify the original upstream icon survived.
-          objdump -x "$RUNNER_TEMP/AIO-Graphics-Test-64bit.exe" > "$RUNNER_TEMP/AIO-Graphics-Test-resources.txt"
-          python - "$RUNNER_TEMP/AIO-Graphics-Test-resources.txt" <<'PY'
+          python - "$RUNNER_TEMP/TestD3D.exe" "$RUNNER_TEMP/direct3d-manifest.json" <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import struct
+          import sys
+
+          executable = pathlib.Path(sys.argv[1])
+          manifest = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
+          data = executable.read_bytes()
+          assert len(data) >= 256 and data[:2] == b"MZ", "TestD3D.exe is not a PE executable"
+          pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+          assert data[pe_offset:pe_offset + 4] == b"PE\0\0", "PE signature is missing"
+          machine = struct.unpack_from("<H", data, pe_offset + 4)[0]
+          assert machine == 0x8664, f"Expected x86-64 PE, got 0x{machine:04x}"
+          assert manifest["file"] == "TestD3D.exe"
+          assert manifest["architecture"] == "x86_64"
+          assert manifest["api"] == "Direct3D 9"
+          assert manifest["sourceRepository"] == "microsoft/DirectX-SDK-Samples"
+          assert manifest["sourceCommit"] == "07e3eaa10e7dd026ec9d95fe326db2d5c4227e1b"
+          assert manifest["size"] == len(data), "Manifest size does not match the executable"
+          digest = hashlib.sha256(data).hexdigest()
+          assert manifest["sha256"] == digest, "Manifest SHA-256 does not match the executable"
+          print(f"Verified Microsoft D3D9 test: {len(data)} bytes, SHA-256 {digest}")
+          PY
+
+          # Confirm the test has no external Visual C++ runtime dependency.
+          objdump -p "$RUNNER_TEMP/TestD3D.exe" > "$RUNNER_TEMP/TestD3D-imports.txt"
+          if grep -Eiq 'DLL Name: (VCRUNTIME|MSVCP|api-ms-win-crt)' "$RUNNER_TEMP/TestD3D-imports.txt"; then
+            cat "$RUNNER_TEMP/TestD3D-imports.txt"
+            echo "Direct3D test still depends on a redistributable Visual C++ runtime" >&2
+            exit 1
+          fi
+
+          # Microsoft EmptyProject.rc embeds the upstream DirectX icon in the EXE.
+          objdump -x "$RUNNER_TEMP/TestD3D.exe" > "$RUNNER_TEMP/TestD3D-resources.txt"
+          python - "$RUNNER_TEMP/TestD3D-resources.txt" <<'PY'
           import pathlib
           import re
           import sys
 
-          output = pathlib.Path(sys.argv[1]).read_text()
+          output = pathlib.Path(sys.argv[1]).read_text(errors="replace")
           assert "The .rsrc Resource Directory section:" in output, "PE resource section is missing"
-          resource_section = output.split("The .rsrc Resource Directory section:", 1)[1]
-          root_type_ids = set(re.findall(r"(?m)^[0-9a-fA-F]{3}   Entry: ID: (0x[0-9a-fA-F]+)", resource_section))
-          assert "0x000003" in root_type_ids, "AIO RT_ICON image resources are missing"
-          assert "0x00000e" in root_type_ids, "AIO RT_GROUP_ICON resource is missing"
+          section = output.split("The .rsrc Resource Directory section:", 1)[1]
+          ids = set(re.findall(r"(?m)^\s*[0-9a-fA-F]+\s+Entry: ID: (0x[0-9a-fA-F]+)", section))
+          assert "0x000003" in ids, "Original Microsoft RT_ICON resources are missing"
+          assert "0x00000e" in ids, "Original Microsoft RT_GROUP_ICON resource is missing"
           PY
 
           unzip -p "$APK" assets/wine_startmenu.json > "$RUNNER_TEMP/wine_startmenu.json"
@@ -142,13 +287,8 @@ jobs:
           system_tools = next(item for item in menu if item.get("name") == "System Tools")
           direct3d = next(item for item in system_tools["children"] if item.get("name") == "Test Direct3D")
           assert direct3d["path"] == "Z:/opt/apps/TestD3D.exe"
-          assert direct3d.get("iconLocation") == direct3d["path"], "Test Direct3D shortcut must read its icon from the AIO executable"
+          assert direct3d.get("iconLocation") == direct3d["path"], "Test Direct3D shortcut must read the original icon embedded in TestD3D.exe"
           PY
-
-          unzip -p "$APK" assets/test_direct3d/LICENSE > "$RUNNER_TEMP/AIO-Graphics-Test-LICENSE"
-          unzip -p "$APK" assets/test_direct3d/CREDITS.md > "$RUNNER_TEMP/AIO-Graphics-Test-CREDITS.md"
-          test -s "$RUNNER_TEMP/AIO-Graphics-Test-LICENSE"
-          test -s "$RUNNER_TEMP/AIO-Graphics-Test-CREDITS.md"
 
           unzip -p "$APK" assets/common_dlls.json > "$RUNNER_TEMP/common_dlls.json"
           test -s "$RUNNER_TEMP/common_dlls.json"

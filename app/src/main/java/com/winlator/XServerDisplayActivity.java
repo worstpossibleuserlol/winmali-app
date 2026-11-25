@@ -500,6 +500,22 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         ForegroundService.stopSession(this);
     }
 
+    /**
+     * A normal Wine/Box64 exit is the end of the guest session, not an Android
+     * application restart. Let the Activity lifecycle release the X server,
+     * process launcher, active-container lock and foreground service.
+     */
+    private void finishAfterGuestSessionExit(int status) {
+        android.util.Log.i("WinMali-Launch",
+            "Wine/Box64 guest session exited with status " + status + "; closing the session");
+
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed() ||
+                !exitRequested.compareAndSet(false, true)) return;
+            finish();
+        });
+    }
+
     private boolean setupWineSystemFiles() {
         String appVersion = String.valueOf(AppUtils.getVersionCode(this));
         String rfsVersion = String.valueOf(rootFS.getVersion());
@@ -713,12 +729,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         guestProgramLauncherComponent.setEnvVars(envVars);
-        guestProgramLauncherComponent.setTerminationCallback((status) -> {
-            android.util.Log.e("WinMali-Launch", "Wine/Box64 session exited with status "+status);
-            runOnUiThread(() -> {
-                if (!isFinishing() && !isDestroyed()) exit();
-            });
-        });
+        guestProgramLauncherComponent.setTerminationCallback(this::finishAfterGuestSessionExit);
         guestProgramLauncherComponent.setOutputCallback((line) ->
             android.util.Log.i("WinMali-Guest", line));
         environment.addComponent(guestProgramLauncherComponent);
@@ -1094,23 +1105,40 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     }
 
     /**
-     * Upgrade containers that stored the old WineD3D defaults on Mali.
-     * Explicit non-default custom choices are kept unchanged.
+     * Keep Mali WineD3D on the OpenGL/FBO compatibility path by default.
+     * Mali's compatibility path uses WineD3D OpenGL with backbuffer rendering.
+     * Replace the previous Vulkan/backbuffer and legacy OpenGL/FBO defaults;
+     * other custom renderer/offscreen combinations remain untouched.
      */
     private boolean migrateLegacyMaliWineD3DDefaults() {
         if (!dxwrapper.equals(DXWrappers.WINED3D) || !GraphicsDrivers.isMaliGPU(this) ||
-            container.getExtra("maliD3DDefaultsVersion").equals("2")) return false;
+            container.getExtra("maliD3DDefaultsVersion").equals("3")) return false;
 
+        String migrationVersion = container.getExtra("maliD3DDefaultsVersion");
         String renderer = dxwrapperConfig[0].get("renderer");
         String offscreenMode = dxwrapperConfig[0].get("OffscreenRenderingMode");
-        boolean legacyRenderer = renderer.isEmpty() || renderer.equalsIgnoreCase("gl");
-        boolean legacyOffscreenMode = offscreenMode.isEmpty() || offscreenMode.equalsIgnoreCase("fbo");
-        if (!legacyRenderer || !legacyOffscreenMode) return false;
 
-        dxwrapperConfig[0].put("renderer", "vulkan");
-        dxwrapperConfig[0].put("OffscreenRenderingMode", "backbuffer");
-        container.setDXWrapperConfig(dxwrapperConfig[0].toString()+"|"+dxwrapperConfig[1].toString());
-        container.putExtra("maliD3DDefaultsVersion", "2");
+        boolean legacyMaliVulkanDefaults =
+            (migrationVersion.isEmpty() || migrationVersion.equals("2")) &&
+            renderer.equalsIgnoreCase("vulkan") &&
+            offscreenMode.equalsIgnoreCase("backbuffer");
+        boolean oldOpenGLDefaults =
+            (renderer.isEmpty() || renderer.equalsIgnoreCase("gl")) &&
+            (offscreenMode.isEmpty() || offscreenMode.equalsIgnoreCase("fbo"));
+
+        if (legacyMaliVulkanDefaults || oldOpenGLDefaults) {
+            dxwrapperConfig[0].put("renderer", "gl");
+            dxwrapperConfig[0].put("OffscreenRenderingMode", "backbuffer");
+            container.setDXWrapperConfig(dxwrapperConfig[0].toString()+"|"+dxwrapperConfig[1].toString());
+            android.util.Log.i("WinMali-D3D",
+                "Using WineD3D OpenGL/backbuffer compatibility defaults for Mali");
+        }
+        else {
+            android.util.Log.i("WinMali-D3D",
+                "Preserving explicitly configured Mali WineD3D renderer and offscreen mode");
+        }
+
+        container.putExtra("maliD3DDefaultsVersion", "3");
         return true;
     }
 
