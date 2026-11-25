@@ -52,12 +52,17 @@ public abstract class GraphicsDrivers {
         else return new String[0];
     }
 
+    /**
+     * WineD3D OpenGL remains the safer compatibility default. The Vulkan
+     * renderer is available as an explicit user choice, but is not yet at
+     * feature parity with the OpenGL renderer.
+     */
     public static String getDefaultWineD3DRenderer(boolean maliGpu) {
-        return maliGpu ? "vulkan" : "gl";
+        return "gl";
     }
 
     public static String getDefaultWineD3DOffscreenRenderingMode(boolean maliGpu) {
-        return maliGpu ? "backbuffer" : "fbo";
+        return "fbo";
     }
 
     public static boolean supportsTurnip(Context context) {
