@@ -55,7 +55,7 @@ jobs:
       - name: Build Direct3D 9 EmptyProject x64
         shell: pwsh
         run: |
-          msbuild "directx-sdk-samples/C++/Direct3D/EmptyProject/EmptyProject_2022.sln" /m /verbosity:minimal /p:Configuration=Release /p:Platform=x64
+          msbuild "directx-sdk-samples/C++/Direct3D/EmptyProject/EmptyProject_2022.sln" /m /verbosity:minimal /p:Configuration=Release /p:Platform=x64 /p:RuntimeLibrary=MultiThreaded
           if ($LASTEXITCODE -ne 0) { throw "Microsoft Direct3D 9 sample build failed" }
 
       - name: Package and validate upstream test executable
@@ -239,6 +239,14 @@ jobs:
           assert manifest["sha256"] == digest, "Manifest SHA-256 does not match the executable"
           print(f"Verified Microsoft D3D9 test: {len(data)} bytes, SHA-256 {digest}")
           PY
+
+          # Confirm the test has no external Visual C++ runtime dependency.
+          objdump -p "$RUNNER_TEMP/TestD3D.exe" > "$RUNNER_TEMP/TestD3D-imports.txt"
+          if grep -Eiq 'DLL Name: (VCRUNTIME|MSVCP|api-ms-win-crt)' "$RUNNER_TEMP/TestD3D-imports.txt"; then
+            cat "$RUNNER_TEMP/TestD3D-imports.txt"
+            echo "Direct3D test still depends on a redistributable Visual C++ runtime" >&2
+            exit 1
+          fi
 
           # Microsoft EmptyProject.rc embeds the upstream DirectX icon in the EXE.
           objdump -x "$RUNNER_TEMP/TestD3D.exe" > "$RUNNER_TEMP/TestD3D-resources.txt"
