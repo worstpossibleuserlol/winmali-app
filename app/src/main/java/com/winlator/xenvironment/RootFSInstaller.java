@@ -49,11 +49,11 @@ public abstract class RootFSInstaller {
     public static final byte UPDATE_WINEPREFIX_VERSION = 16; // set it if main wine version change
     public static final String FILENAME = "rootfs.tzst";
 
-    private static final String DIRECT3D_TEST_ASSET =
-        "test_direct3d/AIO-Graphics-Test-64bit.exe";
-    private static final long DIRECT3D_TEST_SIZE = 4331783L;
-    private static final String DIRECT3D_TEST_SHA256 =
-        "7f005809a453916c77673f21d0ea709b0ef5a35a8631c072b3713fd4073c7c7e";
+    private static final String DIRECT3D_TEST_ASSET = "test_direct3d/TestD3D.exe";
+    private static final String DIRECT3D_TEST_MANIFEST = "test_direct3d/manifest.json";
+    private static final String DIRECT3D_TEST_SOURCE_REPOSITORY = "microsoft/DirectX-SDK-Samples";
+    private static final String DIRECT3D_TEST_SOURCE_COMMIT =
+        "07e3eaa10e7dd026ec9d95fe326db2d5c4227e1b";
 
     private static void resetContainerRFSVersions(Context context) {
         ContainerManager manager = new ContainerManager(context);
@@ -117,11 +117,29 @@ public abstract class RootFSInstaller {
         OPERATIONS.execute(() -> installDirect3DTestNow(installationContext));
     }
 
-    private static boolean isExpectedDirect3DTest(File file) {
-        if (file == null || !file.isFile() || FileUtils.isSymlink(file) ||
-            file.length() != DIRECT3D_TEST_SIZE) return false;
+    private static boolean isExpectedDirect3DTest(Context context, File file) {
+        if (context == null || file == null || !file.isFile() ||
+            FileUtils.isSymlink(file)) return false;
 
         try {
+            JSONObject manifest = new JSONObject(FileUtils.readString(context, DIRECT3D_TEST_MANIFEST));
+            String expectedFile = manifest.getString("file");
+            String expectedArchitecture = manifest.getString("architecture");
+            String expectedApi = manifest.getString("api");
+            String sourceRepository = manifest.getString("sourceRepository");
+            String sourceCommit = manifest.getString("sourceCommit");
+            long expectedSize = manifest.getLong("size");
+            String expectedSha256 = manifest.getString("sha256");
+
+            if (!"TestD3D.exe".equals(expectedFile) ||
+                !"x86_64".equals(expectedArchitecture) ||
+                !"Direct3D 9".equals(expectedApi) ||
+                !DIRECT3D_TEST_SOURCE_REPOSITORY.equals(sourceRepository) ||
+                !DIRECT3D_TEST_SOURCE_COMMIT.equals(sourceCommit) ||
+                expectedSize <= 0 ||
+                !expectedSha256.matches("[0-9a-f]{64}") ||
+                file.length() != expectedSize) return false;
+
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             try (InputStream input = new FileInputStream(file)) {
                 byte[] buffer = new byte[8192];
@@ -135,10 +153,11 @@ public abstract class RootFSInstaller {
             for (byte value : digest.digest()) {
                 hash.append(String.format(java.util.Locale.ROOT, "%02x", value & 0xff));
             }
-            return DIRECT3D_TEST_SHA256.equals(hash.toString());
+            return expectedSha256.equals(hash.toString());
         }
         catch (Exception error) {
-            android.util.Log.e("WinMali-TestDirect3D", "Unable to verify the bundled Direct3D test", error);
+            android.util.Log.e("WinMali-TestDirect3D",
+                "Unable to validate the bundled Microsoft Direct3D 9 test", error);
             return false;
         }
     }
@@ -165,15 +184,15 @@ public abstract class RootFSInstaller {
             }
 
             File destination = new File(appsDir, "TestD3D.exe");
-            if (!isExpectedDirect3DTest(destination)) {
+            if (!isExpectedDirect3DTest(context, destination)) {
                 String token = UUID.randomUUID().toString();
                 File staged = new File(appsDir, ".TestD3D.exe.install-"+token);
                 File backup = new File(appsDir, ".TestD3D.exe.backup-"+token);
                 boolean hadPrevious = false;
                 try {
                     if (!FileUtils.copy(context, DIRECT3D_TEST_ASSET, staged) ||
-                        !isExpectedDirect3DTest(staged)) {
-                        throw new java.io.IOException("Bundled AIO Graphics Test failed its size or SHA-256 check");
+                        !isExpectedDirect3DTest(context, staged)) {
+                        throw new java.io.IOException("Bundled Microsoft Direct3D 9 test failed its manifest, size or SHA-256 check");
                     }
 
                     if (destination.exists() || FileUtils.isSymlink(destination)) {
@@ -191,7 +210,7 @@ public abstract class RootFSInstaller {
                     if (backup.exists() && !FileUtils.delete(backup)) {
                         android.util.Log.w("WinMali-TestDirect3D", "Unable to remove the previous test executable backup");
                     }
-                    android.util.Log.i("WinMali-TestDirect3D", "Installed AIO Graphics Test 2.3.1 at "+destination);
+                    android.util.Log.i("WinMali-TestDirect3D", "Installed Microsoft Direct3D 9 test at "+destination);
                 }
                 finally {
                     if (staged.exists() || FileUtils.isSymlink(staged)) FileUtils.delete(staged);
@@ -207,7 +226,7 @@ public abstract class RootFSInstaller {
         }
         catch (Exception error) {
             android.util.Log.e("WinMali-TestDirect3D",
-                "Unable to install AIO Graphics Test; the existing TestD3D.exe was left in place when possible", error);
+                "Unable to install Microsoft Direct3D 9 test; the existing TestD3D.exe was left in place when possible", error);
         }
     }
 
