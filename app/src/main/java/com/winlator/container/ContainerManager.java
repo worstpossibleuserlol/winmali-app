@@ -714,13 +714,37 @@ public class ContainerManager {
         return true;
     }
 
+    private TarCompressorUtils.OnExtractFileListener containerPatternExtractListener(File containerDir) {
+        final String zDrivePath = new File(containerDir, ".wine/dosdevices/z:").getAbsolutePath();
+        // The bundled template was made on an older install and contains an absolute
+        // Z: link into that install's private data directory. Skip that one archive
+        // symlink; recreate it against this install's actual rootfs after extraction.
+        return (file, size) -> zDrivePath.equals(file.getAbsolutePath()) ? null : file;
+    }
+
+    private boolean installContainerZDriveLink(File containerDir) {
+        try {
+            if (ContainerTemplateUtils.installRootFsZDriveLink(containerDir, homeDir.getParentFile())) {
+                return true;
+            }
+        }
+        catch (IOException | RuntimeException error) {
+            android.util.Log.e("WinMali-Containers", "Unable to repair container Z: drive link", error);
+        }
+        lastCreateError = R.string.container_create_pattern_failed;
+        return false;
+    }
+
     private boolean extractContainerPatternFile(String wineVersion, File containerDir) {
+        TarCompressorUtils.OnExtractFileListener listener = containerPatternExtractListener(containerDir);
         if (WineInfo.isMainWineVersion(wineVersion)) {
-            boolean result = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context, "container_pattern.tzst", containerDir);
+            boolean result = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD,
+                context, "container_pattern.tzst", containerDir, listener);
             if (!result) {
                 lastCreateError = R.string.container_create_pattern_failed;
                 return false;
             }
+            if (!installContainerZDriveLink(containerDir)) return false;
 
             try {
                 JSONObject commonDlls = new JSONObject(FileUtils.readString(context, "common_dlls.json"));
@@ -740,8 +764,11 @@ public class ContainerManager {
         File installedWineDir = RootFS.find(context).getInstalledWineDir();
         WineInfo wineInfo = WineInfo.fromIdentifier(context, wineVersion);
         File file = new File(installedWineDir, "container-pattern-"+wineInfo.fullVersion()+".tzst");
-        boolean result = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, file, containerDir);
-        if (!result) lastCreateError = R.string.container_create_custom_runtime_missing;
-        return result;
+        boolean result = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, file, containerDir, listener);
+        if (!result) {
+            lastCreateError = R.string.container_create_custom_runtime_missing;
+            return false;
+        }
+        return installContainerZDriveLink(containerDir);
     }
 }
