@@ -62,7 +62,7 @@ public abstract class GraphicsDrivers {
     }
 
     public static String getDefaultWineD3DOffscreenRenderingMode(boolean maliGpu) {
-        return "fbo";
+        return maliGpu ? "backbuffer" : "fbo";
     }
 
     public static boolean supportsTurnip(Context context) {
