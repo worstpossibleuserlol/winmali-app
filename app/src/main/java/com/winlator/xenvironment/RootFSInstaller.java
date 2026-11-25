@@ -24,7 +24,9 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStream;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Set;
@@ -46,6 +48,12 @@ public abstract class RootFSInstaller {
     public static final byte LATEST_VERSION = 23; // TODO increment it on rootfs update
     public static final byte UPDATE_WINEPREFIX_VERSION = 16; // set it if main wine version change
     public static final String FILENAME = "rootfs.tzst";
+
+    private static final String DIRECT3D_TEST_ASSET =
+        "test_direct3d/AIO-Graphics-Test-64bit.exe";
+    private static final long DIRECT3D_TEST_SIZE = 4331783L;
+    private static final String DIRECT3D_TEST_SHA256 =
+        "7f005809a453916c77673f21d0ea709b0ef5a35a8631c072b3713fd4073c7c7e";
 
     private static void resetContainerRFSVersions(Context context) {
         ContainerManager manager = new ContainerManager(context);
@@ -81,11 +89,135 @@ public abstract class RootFSInstaller {
     public static void install(final MainActivity activity) {
         // Explicit Settings action: force a clean reinstall even when the current
         // rootfs passes the readiness check.
-        ensureInstalled(activity, null, true);
+        if (activity == null) return;
+        Context appContext = activity.getApplicationContext();
+        ensureInstalled(activity, success -> {
+            if (success) scheduleDirect3DTestInstall(appContext);
+        }, true);
     }
 
     public static void installIfNeeded(final MainActivity activity) {
-        ensureInstalled(activity, null, false);
+        if (activity == null) return;
+        Context appContext = activity.getApplicationContext();
+        ensureInstalled(activity, success -> {
+            if (success) scheduleDirect3DTestInstall(appContext);
+        }, false);
+    }
+
+    /**
+     * Updates the existing System Tools -> Test Direct3D target in-place without
+     * reinstalling the shared RootFS or touching any container data.
+     */
+    private static void scheduleDirect3DTestInstall(Context context) {
+        if (context == null) return;
+        Context appContext = context.getApplicationContext();
+        if (appContext == null) appContext = context;
+        final Context installationContext = appContext;
+
+        OPERATIONS.execute(() -> installDirect3DTestNow(installationContext));
+    }
+
+    private static boolean isExpectedDirect3DTest(File file) {
+        if (file == null || !file.isFile() || FileUtils.isSymlink(file) ||
+            file.length() != DIRECT3D_TEST_SIZE) return false;
+
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (InputStream input = new FileInputStream(file)) {
+                byte[] buffer = new byte[8192];
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    digest.update(buffer, 0, count);
+                }
+            }
+
+            StringBuilder hash = new StringBuilder(64);
+            for (byte value : digest.digest()) {
+                hash.append(String.format(java.util.Locale.ROOT, "%02x", value & 0xff));
+            }
+            return DIRECT3D_TEST_SHA256.equals(hash.toString());
+        }
+        catch (Exception error) {
+            android.util.Log.e("WinMali-TestDirect3D", "Unable to verify the bundled Direct3D test", error);
+            return false;
+        }
+    }
+
+    private static void installDirect3DTestNow(Context context) {
+        try {
+            RootFS rootFS = RootFS.find(context);
+            File rootDir = rootFS.getRootDir();
+            if (!rootFS.isValid() || rootDir == null || !rootDir.isDirectory() ||
+                FileUtils.isSymlink(rootDir)) {
+                throw new java.io.IOException("Shared RootFS is not ready");
+            }
+
+            File optDir = new File(rootDir, "opt");
+            if (FileUtils.isSymlink(optDir)) {
+                throw new java.io.IOException("Refusing to write through a symlinked /opt directory");
+            }
+            File appsDir = new File(optDir, "apps");
+            if (FileUtils.isSymlink(appsDir)) {
+                throw new java.io.IOException("Refusing to write through a symlinked /opt/apps directory");
+            }
+            if (!appsDir.isDirectory() && !appsDir.mkdirs()) {
+                throw new java.io.IOException("Unable to prepare /opt/apps");
+            }
+
+            File destination = new File(appsDir, "TestD3D.exe");
+            if (!isExpectedDirect3DTest(destination)) {
+                String token = UUID.randomUUID().toString();
+                File staged = new File(appsDir, ".TestD3D.exe.install-"+token);
+                File backup = new File(appsDir, ".TestD3D.exe.backup-"+token);
+                boolean hadPrevious = false;
+                try {
+                    if (!FileUtils.copy(context, DIRECT3D_TEST_ASSET, staged) ||
+                        !isExpectedDirect3DTest(staged)) {
+                        throw new java.io.IOException("Bundled AIO Graphics Test failed its size or SHA-256 check");
+                    }
+
+                    if (destination.exists() || FileUtils.isSymlink(destination)) {
+                        hadPrevious = destination.renameTo(backup);
+                        if (!hadPrevious) {
+                            throw new java.io.IOException("Unable to preserve the previous TestD3D.exe");
+                        }
+                    }
+
+                    if (!staged.renameTo(destination)) {
+                        if (hadPrevious && backup.exists()) backup.renameTo(destination);
+                        throw new java.io.IOException("Unable to activate the new TestD3D.exe");
+                    }
+
+                    if (backup.exists() && !FileUtils.delete(backup)) {
+                        android.util.Log.w("WinMali-TestDirect3D", "Unable to remove the previous test executable backup");
+                    }
+                    android.util.Log.i("WinMali-TestDirect3D", "Installed AIO Graphics Test 2.3.1 at "+destination);
+                }
+                finally {
+                    if (staged.exists() || FileUtils.isSymlink(staged)) FileUtils.delete(staged);
+                    if (backup.exists() && !destination.exists()) backup.renameTo(destination);
+                    else if (backup.exists() || FileUtils.isSymlink(backup)) FileUtils.delete(backup);
+                }
+            }
+
+            // Preserve the upstream Apache-2.0 license and project attributions
+            // beside the executable so they remain available inside the container.
+            copyDirect3DTestSidecar(context, appsDir, "test_direct3d/LICENSE", "TestD3D-LICENSE.txt");
+            copyDirect3DTestSidecar(context, appsDir, "test_direct3d/CREDITS.md", "TestD3D-CREDITS.md");
+        }
+        catch (Exception error) {
+            android.util.Log.e("WinMali-TestDirect3D",
+                "Unable to install AIO Graphics Test; the existing TestD3D.exe was left in place when possible", error);
+        }
+    }
+
+    private static void copyDirect3DTestSidecar(Context context, File appsDir, String assetPath, String filename) {
+        File destination = new File(appsDir, filename);
+        if (destination.isDirectory() || FileUtils.isSymlink(destination) ||
+            !FileUtils.copy(context, assetPath, destination) ||
+            !destination.isFile() || destination.length() == 0) {
+            android.util.Log.w("WinMali-TestDirect3D", "Unable to install attribution file: "+filename);
+        }
     }
 
     public static void ensureInstalled(final Context context, final Callback<Boolean> callback) {
