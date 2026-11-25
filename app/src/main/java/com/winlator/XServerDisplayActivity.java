@@ -1131,7 +1131,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             dxwrapperConfig[0].put("OffscreenRenderingMode", "backbuffer");
             container.setDXWrapperConfig(dxwrapperConfig[0].toString()+"|"+dxwrapperConfig[1].toString());
             android.util.Log.i("WinMali-D3D",
-                "Using WineD3D OpenGL/FBO compatibility defaults for Mali");
+                "Using WineD3D OpenGL/backbuffer compatibility defaults for Mali");
         }
         else {
             android.util.Log.i("WinMali-D3D",
