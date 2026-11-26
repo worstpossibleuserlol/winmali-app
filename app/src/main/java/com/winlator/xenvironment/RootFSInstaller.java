@@ -76,8 +76,14 @@ public abstract class RootFSInstaller {
 
     public static boolean isReady(Context context) {
         if (context == null) return false;
-        RootFS rootFS = RootFS.find(context);
-        return rootFS.isValid() && rootFS.getVersion() >= LATEST_VERSION;
+        try {
+            RootFS rootFS = RootFS.find(context);
+            return rootFS.isValid() && rootFS.getVersion() >= LATEST_VERSION;
+        }
+        catch (RuntimeException error) {
+            android.util.Log.e("WinMali-RootFS", "Unable to check system-file readiness", error);
+            return false;
+        }
     }
 
     public static boolean isInstalling() {
@@ -98,9 +104,28 @@ public abstract class RootFSInstaller {
 
     public static void installIfNeeded(final MainActivity activity) {
         if (activity == null) return;
-        Context appContext = activity.getApplicationContext();
-        ensureInstalled(activity, success -> {
-            if (success) scheduleDirect3DTestInstall(appContext);
+        // Keep app launch focused on core RootFS readiness/installation. The
+        // optional Direct3D test executable is installed only when that shortcut
+        // is opened, so its file copy/hash work cannot interfere with startup.
+        ensureInstalled(activity, null, false);
+    }
+
+    public static void ensureDirect3DTestInstalled(Context context, Callback<Boolean> callback) {
+        if (context == null) {
+            if (callback != null) callback.call(false);
+            return;
+        }
+
+        Context appContext = context.getApplicationContext();
+        if (appContext == null) appContext = context;
+        final Context installationContext = appContext;
+
+        ensureInstalled(context, ready -> {
+            if (!ready) {
+                if (callback != null) callback.call(false);
+                return;
+            }
+            scheduleDirect3DTestInstall(installationContext, callback);
         }, false);
     }
 
@@ -109,12 +134,31 @@ public abstract class RootFSInstaller {
      * reinstalling the shared RootFS or touching any container data.
      */
     private static void scheduleDirect3DTestInstall(Context context) {
-        if (context == null) return;
+        scheduleDirect3DTestInstall(context, null);
+    }
+
+    private static void scheduleDirect3DTestInstall(Context context, Callback<Boolean> callback) {
+        if (context == null) {
+            if (callback != null) callback.call(false);
+            return;
+        }
         Context appContext = context.getApplicationContext();
         if (appContext == null) appContext = context;
         final Context installationContext = appContext;
 
-        OPERATIONS.execute(() -> installDirect3DTestNow(installationContext));
+        OPERATIONS.execute(() -> {
+            boolean installed = false;
+            try {
+                installed = installDirect3DTestNow(installationContext);
+            }
+            catch (RuntimeException error) {
+                android.util.Log.e("WinMali-TestDirect3D", "Deferred Test Direct3D installation failed", error);
+            }
+            if (callback != null) {
+                final boolean result = installed;
+                new Handler(installationContext.getMainLooper()).post(() -> callback.call(result));
+            }
+        });
     }
 
     private static boolean isExpectedDirect3DTest(Context context, File file) {
@@ -162,7 +206,7 @@ public abstract class RootFSInstaller {
         }
     }
 
-    private static void installDirect3DTestNow(Context context) {
+    private static boolean installDirect3DTestNow(Context context) {
         try {
             RootFS rootFS = RootFS.find(context);
             File rootDir = rootFS.getRootDir();
@@ -223,10 +267,12 @@ public abstract class RootFSInstaller {
             // executable so they remain available inside the container.
             copyDirect3DTestSidecar(context, appsDir, "test_direct3d/LICENSE", "TestD3D-LICENSE.txt");
             copyDirect3DTestSidecar(context, appsDir, "test_direct3d/CREDITS.md", "TestD3D-CREDITS.md");
+            return isExpectedDirect3DTest(context, destination);
         }
         catch (Exception error) {
             android.util.Log.e("WinMali-TestDirect3D",
                 "Unable to install Microsoft Direct3D 9 test; the existing TestD3D.exe was left in place when possible", error);
+            return false;
         }
     }
 

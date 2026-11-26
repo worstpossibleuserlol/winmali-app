@@ -26,6 +26,7 @@ import com.winlator.contentdialog.CreateFolderDialog;
 import com.winlator.contentdialog.ShortcutSettingsDialog;
 import com.winlator.core.AppUtils;
 import com.winlator.core.ArrayUtils;
+import com.winlator.xenvironment.RootFSInstaller;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -223,13 +224,28 @@ public class ShortcutsFragment extends BaseFileManagerFragment<Shortcut> {
                 ActionBar actionBar = activity.getSupportActionBar();
                 actionBar.setHomeAsUpIndicator(R.drawable.icon_action_bar_back);
                 actionBar.setTitle(shortcut.name);
+                return;
             }
-            else {
+
+            Runnable launchShortcut = () -> {
+                if (activity.isFinishing()) return;
                 Intent intent = new Intent(activity, XServerDisplayActivity.class);
                 intent.putExtra("container_id", shortcut.container.id);
                 intent.putExtra("shortcut_path", shortcut.file.getPath());
                 activity.startActivity(intent);
+            };
+
+            String executablePath = shortcut.path != null ?
+                shortcut.path.replace('\\', '/').toLowerCase(java.util.Locale.ROOT) : "";
+            if (executablePath.endsWith("/testd3d.exe")) {
+                // Refresh the optional Microsoft D3D9 test only when it is used,
+                // never while MainActivity is starting.
+                RootFSInstaller.ensureDirect3DTestInstalled(activity, installed -> {
+                    if (installed) launchShortcut.run();
+                    else AppUtils.showToast(activity, R.string.unable_to_install_system_files);
+                });
             }
+            else launchShortcut.run();
         }
     }
 }
